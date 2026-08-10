@@ -3,22 +3,52 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#10201F">
+<meta name="theme-color" content="#E9EEF1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#070D10" media="(prefers-color-scheme: dark)">
 <meta name="description" content="Vergleicht das aktuelle Wetter mit dem Klima eines Reiseziels.">
 <link rel="manifest" href="manifest.json">
 <title>Klimakompass</title>
 <style>
   :root{
-    --bg:#F4F6F5;
-    --panel:#FFFFFF;
-    --ink:#14201E;
-    --muted:#697A76;
-    --rule:#DBE2DF;
-    --accent:#0E7C7B;
-    --ref:#41504C;
-    --warn:#B4400C;
-    --radius:10px;
+    --bg:#E9EEF1;
+    --bg2:#F5F8F9;
+    --surface:rgba(255,255,255,0.70);
+    --surface-solid:#FFFFFF;
+    --ink:#101A1E;
+    --muted:#5E7076;
+    --faint:#8A9DA3;
+    --line:rgba(16,26,30,0.10);
+    --line-strong:rgba(16,26,30,0.18);
+    --accent:#0C8F8C;
+    --ref:#5B6E74;
+    --warn:#B23A16;
+    --track:rgba(16,26,30,0.07);
+    --shadow:0 1px 2px rgba(16,26,30,.05), 0 8px 24px rgba(16,26,30,.06);
+    --r:18px;
+    --tintA:rgba(120,170,180,0.30);
+    --tintB:rgba(180,190,200,0.16);
   }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#070D10;
+      --bg2:#0E171B;
+      --surface:rgba(255,255,255,0.055);
+      --surface-solid:#131E23;
+      --ink:#E8F1F3;
+      --muted:#93A7AD;
+      --faint:#6B8087;
+      --line:rgba(255,255,255,0.10);
+      --line-strong:rgba(255,255,255,0.20);
+      --accent:#2FD3CB;
+      --ref:#9DB2B8;
+      --warn:#FF8A5B;
+      --track:rgba(255,255,255,0.09);
+      --shadow:0 1px 2px rgba(0,0,0,.35), 0 10px 30px rgba(0,0,0,.35);
+      --tintA:rgba(60,140,160,0.34);
+      --tintB:rgba(20,60,80,0.30);
+    }
+  }
+
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
   html,body{margin:0;padding:0;}
   body{
@@ -26,184 +56,226 @@
     color:var(--ink);
     font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
     font-size:15px;line-height:1.45;
-    padding:0 0 48px;
+    padding:0 0 56px;
+    min-height:100vh;
     -webkit-text-size-adjust:100%;
   }
-  .wrap{max-width:640px;margin:0 auto;padding:0 14px;}
-  .mono{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;font-variant-numeric:tabular-nums;}
-
-  header{
-    padding:calc(14px + env(safe-area-inset-top)) 0 10px;
+  /* Atmosphäre: Hintergrund nimmt die Farbe der Zielbedingungen an */
+  .atmos{
+    position:fixed;inset:0;z-index:-1;pointer-events:none;
+    background:
+      radial-gradient(120% 70% at 50% -10%, var(--tintA), transparent 62%),
+      radial-gradient(140% 60% at 20% 108%, var(--tintB), transparent 66%),
+      linear-gradient(180deg, var(--bg2), var(--bg) 55%);
+    transition:background 700ms ease;
   }
-  h1{font-size:17px;font-weight:650;letter-spacing:-0.01em;margin:0;}
+  @media (prefers-reduced-motion:reduce){.atmos{transition:none;}}
+
+  .wrap{max-width:620px;margin:0 auto;padding:0 14px;}
+  .mono{font-variant-numeric:tabular-nums;}
+
+  header{padding:calc(18px + env(safe-area-inset-top)) 0 6px;}
+  h1{font-size:15px;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;margin:0;color:var(--muted);}
   h1 span{color:var(--accent);}
-  .tagline{font-size:12.5px;color:var(--muted);margin:2px 0 0;}
+  .tagline{font-size:20px;font-weight:300;letter-spacing:-0.02em;margin:6px 0 0;color:var(--ink);}
 
   /* Modus-Umschalter */
-  .modes{display:flex;gap:0;background:#E5EAE8;border-radius:var(--radius);padding:3px;margin:14px 0 16px;}
+  .modes{display:flex;gap:4px;margin:18px 0 16px;}
   .modes button{
-    flex:1;border:0;background:transparent;padding:9px 6px;border-radius:7px;
-    font:inherit;font-size:13.5px;font-weight:550;color:var(--muted);cursor:pointer;
+    flex:1;border:1px solid transparent;background:var(--track);padding:10px 6px;border-radius:12px;
+    font:inherit;font-size:13.5px;font-weight:500;color:var(--muted);cursor:pointer;transition:.18s;
   }
-  .modes button[aria-selected="true"]{background:var(--panel);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.08);}
+  .modes button[aria-selected="true"]{background:var(--surface-solid);color:var(--ink);border-color:var(--line);box-shadow:var(--shadow);}
 
   .card{
-    background:var(--panel);border-radius:var(--radius);
-    padding:14px;margin-bottom:12px;border:1px solid var(--rule);
+    background:var(--surface);
+    -webkit-backdrop-filter:blur(18px) saturate(140%);
+    backdrop-filter:blur(18px) saturate(140%);
+    border:1px solid var(--line);
+    border-radius:var(--r);
+    padding:16px;margin-bottom:12px;
+    box-shadow:var(--shadow);
   }
   .card-label{
-    font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;
-    font-weight:700;color:var(--muted);margin-bottom:8px;display:flex;align-items:center;gap:8px;
+    font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;
+    font-weight:600;color:var(--faint);margin-bottom:10px;
   }
-  .card.reference{border-left:3px solid var(--ref);}
   .card.reference .card-label{color:var(--ref);}
-  .card.target{border-left:3px solid var(--accent);}
   .card.target .card-label{color:var(--accent);}
 
-  .place-row{display:flex;align-items:center;gap:8px;margin-bottom:10px;}
-  .place-name{font-size:16px;font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-  .place-sub{font-size:12px;color:var(--muted);font-weight:400;}
+  .place-row{display:flex;align-items:center;gap:10px;margin-bottom:12px;}
+  .place-name{font-size:21px;font-weight:400;letter-spacing:-0.02em;flex:1;min-width:0;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .place-sub{font-size:12.5px;color:var(--muted);margin-bottom:12px;}
 
   button.ghost{
-    border:1px solid var(--rule);background:var(--panel);color:var(--ink);
-    border-radius:7px;padding:7px 10px;font:inherit;font-size:13px;cursor:pointer;
+    border:1px solid var(--line-strong);background:transparent;color:var(--ink);
+    border-radius:11px;padding:8px 12px;font:inherit;font-size:13px;cursor:pointer;transition:.15s;
   }
-  button.ghost:active{background:#EEF2F0;}
-  button.star{border:0;background:none;font-size:19px;line-height:1;cursor:pointer;padding:2px 4px;color:var(--rule);}
-  button.star.on{color:#E0A421;}
+  button.ghost:active{background:var(--track);}
+  button.ghost[disabled]{opacity:.4;}
+  button.star{border:0;background:none;font-size:20px;line-height:1;cursor:pointer;padding:2px 2px;color:var(--faint);}
+  button.star.on{color:#E8B22B;}
 
-  .seg{display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap;}
+  .seg{display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap;}
   .seg button{
-    border:1px solid var(--rule);background:var(--panel);border-radius:20px;
-    padding:5px 12px;font:inherit;font-size:12.5px;color:var(--muted);cursor:pointer;
+    border:1px solid var(--line-strong);background:transparent;border-radius:20px;
+    padding:6px 13px;font:inherit;font-size:12.5px;color:var(--muted);cursor:pointer;transition:.15s;
   }
-  .seg button[aria-pressed="true"]{background:var(--ink);color:#fff;border-color:var(--ink);}
+  .seg button[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink);font-weight:500;}
 
   /* Monatswahl */
-  .months{display:grid;grid-template-columns:repeat(6,1fr);gap:5px;margin-bottom:12px;}
+  .months{display:grid;grid-template-columns:repeat(6,1fr);gap:5px;margin-bottom:14px;}
   .months button{
-    border:1px solid var(--rule);background:var(--panel);border-radius:6px;
-    padding:7px 2px;font:inherit;font-size:12px;color:var(--muted);cursor:pointer;
+    border:1px solid var(--line);background:transparent;border-radius:9px;
+    padding:8px 2px;font:inherit;font-size:12px;color:var(--muted);cursor:pointer;transition:.15s;
   }
-  .months button[aria-pressed="true"]{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:600;}
-
-  /* Empfehlung */
-  .reco{border-top:1px solid var(--rule);margin-top:14px;padding-top:14px;}
-  .reco h3{font-size:14px;font-weight:650;margin:0 0 10px;}
-  .reco .seg{margin-bottom:12px;}
-  .reco-text{font-size:15px;margin:0 0 10px;line-height:1.45;}
-  .reco-text b{color:var(--accent);font-weight:650;}
-  .reco-bars{display:flex;flex-direction:column;gap:3px;margin-bottom:10px;}
-  .reco-row{display:grid;grid-template-columns:30px 62px 1fr;gap:8px;align-items:center;font-size:11.5px;color:var(--muted);}
-  .reco-row .rm{font-weight:600;}
-  .reco-row .rb{height:9px;background:#EDF1EF;border-radius:2px;overflow:hidden;}
-  .reco-row .rb i{display:block;height:100%;background:#B3C2BE;}
-  .reco-row.on{color:var(--ink);}
-  .reco-row.on .rm{color:var(--accent);font-weight:700;}
-  .reco-row.on .rb i{background:var(--accent);}
-  .reco-note{font-size:11.5px;color:var(--muted);line-height:1.5;margin:0;}
-
-  /* Karte */
-  #mapCanvas{height:min(58vh,420px);width:100%;background:#E4EAE7;}
-  .map-foot{display:flex;align-items:center;gap:8px;padding:10px 14px 4px;}
-  .map-foot .seg{margin:0;flex:1;}
-  .mapnote{font-size:11px;color:var(--muted);padding:2px 14px 12px;margin:0;line-height:1.45;}
-  .leaflet-container{font:inherit;}
-  button.ghost[disabled]{opacity:.45;}
-
-  /* Detailansicht: Tagesgang */
-  .detail-head{
-    padding:14px 14px 10px;border-bottom:1px solid var(--rule);
-    display:flex;align-items:center;gap:10px;
-  }
-  .detail-head .dt{flex:1;min-width:0;}
-  .detail-head .dt b{font-size:16px;font-weight:650;display:block;}
-  .detail-head .dt span{font-size:12px;color:var(--muted);}
-  .detail-body{max-height:70vh;overflow:auto;padding:4px 14px 14px;}
-  .chart{margin-top:14px;}
-  .chart h3{font-size:12.5px;font-weight:600;margin:0 0 2px;}
-  .chart .ch-sub{font-size:11.5px;color:var(--muted);margin:0 0 6px;}
-  .chart svg{width:100%;display:block;overflow:visible;}
-  .legend-row{display:flex;gap:14px;font-size:11.5px;color:var(--muted);margin-top:4px;}
-  .legend-row i{display:inline-block;width:14px;height:3px;border-radius:2px;vertical-align:middle;margin-right:5px;}
-  .peak{font-size:12px;color:var(--ink);margin-top:6px;line-height:1.45;}
-  .peak b{font-weight:600;}
-  .tapnote{font-size:11.5px;color:var(--muted);margin-top:8px;text-align:center;}
-  .yrow{cursor:pointer;}
-  .yrow:active{background:#F0F4F2;}
+  .months button[aria-pressed="true"]{background:var(--accent);color:#06231F;border-color:var(--accent);font-weight:600;}
 
   /* Messwerte */
-  .metrics{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--rule);border-radius:8px;overflow:hidden;}
-  .metric{background:var(--panel);padding:9px 10px;}
-  .metric .k{font-size:11px;color:var(--muted);}
-  .metric .v{font-size:18px;font-weight:600;margin-top:1px;}
-  .metric .v small{font-size:12px;font-weight:400;color:var(--muted);}
+  .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:16px 10px;}
+  .stat .k{display:block;font-size:11px;color:var(--muted);margin-bottom:1px;}
+  .stat .v{display:block;font-size:27px;font-weight:250;letter-spacing:-0.03em;line-height:1.05;
+    font-variant-numeric:tabular-nums;}
+  .stat .v small{font-size:13px;font-weight:400;color:var(--muted);letter-spacing:0;}
+  .stat.lead .v{font-size:38px;}
 
   /* Verdikt */
   .verdict{
-    background:var(--ink);color:#F2F5F4;border-radius:var(--radius);
-    padding:14px;margin-bottom:12px;font-size:15px;line-height:1.5;
+    border-radius:var(--r);padding:18px 16px;margin-bottom:12px;
+    background:var(--surface);border:1px solid var(--line);
+    -webkit-backdrop-filter:blur(18px) saturate(140%);backdrop-filter:blur(18px) saturate(140%);
+    box-shadow:var(--shadow);
+    font-size:19px;font-weight:300;line-height:1.4;letter-spacing:-0.01em;
   }
-  .verdict b{color:#7FD1CE;font-weight:600;}
-  .verdict .head{font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:#8FA5A1;margin-bottom:6px;}
+  .verdict b{color:var(--accent);font-weight:500;}
+  .verdict .head{font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--faint);margin-bottom:9px;font-weight:600;}
 
-  /* Delta-Liste */
-  .deltas{display:flex;flex-direction:column;gap:0;}
-  .delta{display:flex;align-items:center;gap:10px;padding:9px 0;border-top:1px solid var(--rule);}
-  .delta:first-child{border-top:0;}
-  .delta .dk{font-size:12.5px;color:var(--muted);width:78px;flex:none;}
-  .delta .db{flex:1;height:16px;position:relative;background:#EDF1EF;border-radius:3px;overflow:hidden;}
-  .delta .db i{position:absolute;top:0;bottom:0;background:var(--accent);opacity:.8;}
-  .delta .db u{position:absolute;top:0;bottom:0;width:1px;left:50%;background:#B9C4C1;}
-  .delta .dv{font-size:13px;font-weight:600;width:72px;text-align:right;flex:none;}
+  /* Gemeinsame Vergleichsachsen */
+  .axes{padding-top:2px;}
+  .axis{margin-bottom:22px;}
+  .axis:last-child{margin-bottom:4px;}
+  .axis-head{display:flex;align-items:baseline;gap:8px;margin-bottom:16px;}
+  .axis-head .ax-label{font-size:12.5px;color:var(--muted);flex:1;}
+  .axis-head .ax-gap{font-size:13px;font-weight:600;font-variant-numeric:tabular-nums;}
+  .axis-track{position:relative;height:9px;border-radius:5px;}
+  .axis-conn{position:absolute;top:3px;height:3px;background:var(--ink);opacity:.30;border-radius:2px;}
+  .pin{position:absolute;top:50%;width:0;height:0;}
+  .pin i{
+    position:absolute;left:-8px;top:-8px;width:16px;height:16px;border-radius:50%;
+    border:3px solid var(--surface-solid);box-shadow:0 1px 4px rgba(0,0,0,.3);
+  }
+  .pin.ref i{background:var(--ref);}
+  .pin.tgt i{background:var(--ink);}
+  .pin b{
+    position:absolute;transform:translateX(-50%);white-space:nowrap;
+    font-size:12.5px;font-weight:600;font-variant-numeric:tabular-nums;
+  }
+  .pin.ref b{top:12px;color:var(--ref);}
+  .pin.tgt b{bottom:12px;color:var(--ink);}
+  .axis-foot{display:flex;justify-content:space-between;gap:10px;margin-top:26px;font-size:11.5px;}
+  .axis-foot .zref{color:var(--muted);}
+  .axis-foot .ztgt{color:var(--ink);font-weight:500;}
+  .axis-legend{display:flex;gap:16px;font-size:11.5px;color:var(--muted);margin:2px 0 16px;}
+  .axis-legend i{display:inline-block;width:10px;height:10px;border-radius:50%;vertical-align:-1px;margin-right:6px;}
 
   /* Jahresprofil */
   .yearlist{display:flex;flex-direction:column;}
-  .yrow{display:grid;grid-template-columns:34px 1fr;gap:8px;align-items:center;padding:5px 0;border-top:1px solid var(--rule);}
+  .yrow{display:grid;grid-template-columns:34px 1fr;gap:10px;align-items:center;
+    padding:7px 0;border-top:1px solid var(--line);cursor:pointer;border-radius:8px;}
   .yrow:first-child{border-top:0;}
-  .yrow.best .ym{color:var(--accent);font-weight:700;}
+  .yrow:active{background:var(--track);}
   .ym{font-size:12px;color:var(--muted);font-weight:600;}
-  .ybars{display:grid;grid-template-columns:1fr;gap:3px;}
-  .tempbar{position:relative;height:19px;border-radius:3px;background:#EDF1EF;overflow:hidden;}
-  .tempbar i{position:absolute;top:0;bottom:0;border-radius:3px;}
-  .tempbar span{position:absolute;right:6px;top:50%;transform:translateY(-50%);font-size:11.5px;font-weight:600;}
-  .ymeta{display:flex;gap:10px;font-size:11px;color:var(--muted);}
-  .ymeta b{font-weight:600;color:var(--ink);}
+  .ybars{display:grid;grid-template-columns:1fr;gap:4px;}
+  .tempbar{position:relative;height:22px;border-radius:6px;background:var(--track);overflow:hidden;}
+  .tempbar i{position:absolute;top:0;bottom:0;border-radius:6px;}
+  .tempbar span{position:absolute;right:8px;top:50%;transform:translateY(-50%);
+    font-size:11.5px;font-weight:600;font-variant-numeric:tabular-nums;}
+  .ymeta{display:flex;gap:12px;font-size:11px;color:var(--muted);}
+  .ymeta b{font-weight:600;color:var(--ink);font-variant-numeric:tabular-nums;}
 
-  .scale{display:flex;justify-content:space-between;font-size:10.5px;color:var(--muted);margin-top:6px;}
+  /* Empfehlung */
+  .reco{border-top:1px solid var(--line);margin-top:16px;padding-top:16px;}
+  .reco h3{font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--faint);
+    font-weight:600;margin:0 0 12px;}
+  .reco-text{font-size:19px;font-weight:300;margin:0 0 14px;line-height:1.4;letter-spacing:-0.01em;}
+  .reco-text b{color:var(--accent);font-weight:500;}
+  .reco-bars{display:flex;flex-direction:column;gap:4px;margin-bottom:12px;}
+  .reco-row{display:grid;grid-template-columns:30px 58px 1fr;gap:9px;align-items:center;
+    font-size:11.5px;color:var(--muted);}
+  .reco-row .rm{font-weight:600;}
+  .reco-row .rb{height:10px;background:var(--track);border-radius:5px;overflow:hidden;}
+  .reco-row .rb i{display:block;height:100%;background:var(--line-strong);border-radius:5px;}
+  .reco-row.on{color:var(--ink);}
+  .reco-row.on .rm{color:var(--accent);font-weight:700;}
+  .reco-row.on .rb i{background:var(--accent);}
+  .reco-note{font-size:11.5px;color:var(--muted);line-height:1.55;margin:0;}
 
-  /* Suche */
+  /* Karte */
+  #mapCanvas{height:min(58vh,420px);width:100%;background:var(--track);}
+  .map-foot{display:flex;align-items:center;gap:8px;padding:12px 14px 4px;}
+  .map-foot .seg{margin:0;flex:1;}
+  .mapnote{font-size:11px;color:var(--muted);padding:2px 14px 14px;margin:0;line-height:1.5;}
+  .leaflet-container{font:inherit;}
+
+  /* Detailansicht */
+  .detail-head{padding:16px 16px 12px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px;}
+  .detail-head .dt{flex:1;min-width:0;}
+  .detail-head .dt b{font-size:19px;font-weight:400;letter-spacing:-0.02em;display:block;}
+  .detail-head .dt span{font-size:12px;color:var(--muted);}
+  .detail-body{max-height:70vh;overflow:auto;padding:4px 16px 16px;}
+  .chart{margin-top:18px;}
+  .chart h3{font-size:13px;font-weight:600;margin:0 0 2px;}
+  .chart .ch-sub{font-size:11.5px;color:var(--muted);margin:0 0 8px;}
+  .chart svg{width:100%;display:block;overflow:visible;}
+  .legend-row{display:flex;gap:16px;font-size:11.5px;color:var(--muted);margin-top:6px;}
+  .legend-row i{display:inline-block;width:14px;height:3px;border-radius:2px;vertical-align:middle;margin-right:6px;}
+  .peak{font-size:12.5px;color:var(--ink);margin-top:8px;line-height:1.5;}
+  .peak b{font-weight:600;}
+  .tapnote{font-size:11.5px;color:var(--muted);margin-top:10px;text-align:center;}
+
+  /* Dialoge */
   dialog{
-    border:0;border-radius:12px;padding:0;width:min(94vw,460px);
-    background:var(--panel);color:var(--ink);box-shadow:0 12px 40px rgba(0,0,0,.28);
+    border:0;border-radius:20px;padding:0;width:min(94vw,460px);
+    background:var(--surface-solid);color:var(--ink);
+    box-shadow:0 20px 60px rgba(0,0,0,.4);
   }
-  dialog::backdrop{background:rgba(10,20,18,.5);}
-  .dlg-head{padding:14px 14px 10px;border-bottom:1px solid var(--rule);}
+  dialog::backdrop{background:rgba(4,10,12,.62);-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px);}
+  .dlg-head{padding:16px 16px 12px;border-bottom:1px solid var(--line);}
   .dlg-head input{
-    width:100%;font:inherit;font-size:16px;padding:10px 12px;
-    border:1px solid var(--rule);border-radius:8px;background:var(--bg);color:var(--ink);
+    width:100%;font:inherit;font-size:16px;padding:11px 13px;
+    border:1px solid var(--line-strong);border-radius:12px;background:var(--track);color:var(--ink);
   }
   .dlg-body{max-height:56vh;overflow:auto;}
-  .res{padding:11px 14px;border-bottom:1px solid var(--rule);cursor:pointer;display:flex;align-items:center;gap:8px;}
-  .res:active{background:#EEF2F0;}
-  .res .rn{font-weight:550;}
+  .res{padding:12px 16px;border-bottom:1px solid var(--line);cursor:pointer;}
+  .res:active{background:var(--track);}
+  .res .rn{font-weight:500;}
   .res .rs{font-size:12px;color:var(--muted);}
-  .dlg-foot{padding:10px 14px;display:flex;justify-content:space-between;align-items:center;}
-  .sec-label{font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);padding:10px 14px 4px;font-weight:700;}
+  .dlg-foot{padding:12px 14px;display:flex;justify-content:space-between;gap:6px;align-items:center;}
+  .sec-label{font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--faint);
+    padding:12px 16px 4px;font-weight:600;}
 
-  .msg{font-size:13px;color:var(--muted);padding:14px;text-align:center;}
+  .msg{font-size:13px;color:var(--muted);padding:16px;text-align:center;}
   .msg.err{color:var(--warn);}
-  .skel{height:14px;background:linear-gradient(90deg,#E9EEEC,#F4F7F6,#E9EEEC);background-size:200% 100%;animation:sh 1.2s infinite;border-radius:4px;}
+  .skel{height:14px;background:linear-gradient(90deg,var(--track),transparent,var(--track));
+    background-size:200% 100%;animation:sh 1.3s infinite;border-radius:8px;}
   @keyframes sh{0%{background-position:200% 0}100%{background-position:-200% 0}}
   @media (prefers-reduced-motion:reduce){.skel{animation:none}}
 
-  footer{font-size:11.5px;color:var(--muted);text-align:center;padding:18px 14px 0;line-height:1.6;}
+  footer{font-size:11.5px;color:var(--faint);text-align:center;padding:22px 14px 0;line-height:1.7;}
   footer a{color:var(--muted);}
-  :focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+  :focus-visible{outline:2px solid var(--accent);outline-offset:3px;}
   .hidden{display:none !important;}
+  @media (max-width:380px){
+    .stats{grid-template-columns:repeat(2,1fr);}
+    .stat .v{font-size:25px;}
+    .stat.lead .v{font-size:34px;}
+  }
 </style>
 </head>
 <body>
+<div class="atmos" aria-hidden="true"></div>
 <div class="wrap">
 
   <header>
@@ -222,7 +294,7 @@
     <div class="card reference">
       <div class="card-label">Referenz</div>
       <div class="seg" id="refModeSeg">
-        <button data-m="now" aria-pressed="true">Jetzt &amp; hier</button>
+        <button data-m="now" aria-pressed="true">Heute &amp; hier</button>
         <button data-m="period" aria-pressed="false">Ort &amp; Monat</button>
       </div>
       <div class="place-row">
@@ -394,7 +466,7 @@ async function fetchToday(p){
   const url = "https://api.open-meteo.com/v1/forecast?latitude=" + p.lat + "&longitude=" + p.lon +
     "&daily=temperature_2m_max,temperature_2m_min,apparent_temperature_max,apparent_temperature_min," +
     "precipitation_sum,weather_code" +
-    "&hourly=relative_humidity_2m,wind_speed_10m" +
+    "&hourly=relative_humidity_2m,wind_speed_10m,dew_point_2m" +
     "&forecast_days=1&timezone=auto";
   const j = await getJSON(url);
   const d = j.daily || {};
@@ -402,6 +474,12 @@ async function fetchToday(p){
   const avg = a => {
     const v = (a || []).filter(x => x != null && isFinite(x));
     return v.length ? v.reduce((s, x) => s + x, 0) / v.length : null;
+  };
+  const dewPoint = (t, rh) => {
+    if(t == null || rh == null) return null;
+    const b = 17.62, c = 243.12;
+    const g = Math.log(Math.max(rh, 1) / 100) + (b * t) / (c + t);
+    return (c * g) / (b - g);
   };
   const first = a => a && a.length ? a[0] : null;
   return {
@@ -411,6 +489,8 @@ async function fetchToday(p){
     feelsMin: first(d.apparent_temperature_min),
     precip: first(d.precipitation_sum),
     rh: avg(h.relative_humidity_2m),
+    dew: avg(h.dew_point_2m) != null ? avg(h.dew_point_2m)
+         : dewPoint(avg(h.temperature_2m), avg(h.relative_humidity_2m)),
     wind: avg(h.wind_speed_10m),
     sky: WCODE[first(d.weather_code)] || ""
   };
@@ -494,40 +574,73 @@ async function fetchClimate(p){
   return out;
 }
 
-/* ---------------- Farbskala ---------------- */
-function tempColor(t){
-  if(t == null) return "#CBD3CF";
-  const stops = [[5,"#4A7FB5"],[15,"#5AA6A4"],[22,"#79B36A"],[28,"#E0A421"],[33,"#D9702B"],[40,"#B03A2E"]];
-  if(t <= stops[0][0]) return stops[0][1];
-  if(t >= stops[stops.length-1][0]) return stops[stops.length-1][1];
+/* ---------------- Farbskalen ----------------
+   Jede Messgrösse hat ein eigenes Spektrum und eigene Zonenwörter, damit eine Zahl
+   sofort einen Namen bekommt: nicht "15 °C", sondern "kühle 15 °C". */
+
+function mix(a, b, f){ return a.map((v, i) => Math.round(v + (b[i] - v) * f)); }
+function spectrum(stops, v){
+  if(v == null || !isFinite(v)) return [150, 160, 165];
+  if(v <= stops[0][0]) return stops[0][1];
+  const last = stops[stops.length - 1];
+  if(v >= last[0]) return last[1];
   for(let i = 0; i < stops.length - 1; i++){
-    const [a, ca] = stops[i], [b, cb] = stops[i+1];
-    if(t >= a && t <= b){
-      const f = (t - a) / (b - a);
-      const hex = c => [parseInt(c.slice(1,3),16), parseInt(c.slice(3,5),16), parseInt(c.slice(5,7),16)];
-      const A = hex(ca), B = hex(cb);
-      const mix = A.map((v, k) => Math.round(v + (B[k] - v) * f));
-      return "rgb(" + mix.join(",") + ")";
-    }
+    const [a, ca] = stops[i], [b, cb] = stops[i + 1];
+    if(v >= a && v <= b) return mix(ca, cb, (v - a) / (b - a));
   }
-  return "#CBD3CF";
+  return [150, 160, 165];
+}
+const rgb = c => "rgb(" + c.join(",") + ")";
+const rgba = (c, a) => "rgba(" + c.join(",") + "," + a + ")";
+
+const SPECTRA = {
+  temp: [[-5,[74,110,180]],[8,[80,160,190]],[17,[95,175,140]],[24,[214,175,60]],[31,[221,120,50]],[40,[186,52,44]]],
+  dew:  [[2,[196,166,74]],[13,[110,180,160]],[18,[70,140,180]],[22,[74,90,170]],[26,[86,58,140]]],
+  wind: [[0,[150,170,178]],[12,[110,160,180]],[24,[60,130,170]],[38,[38,92,146]],[55,[26,58,110]]],
+  rain: [[0,[206,178,88]],[6,[150,180,150]],[13,[92,158,180]],[21,[54,110,168]],[30,[36,70,132]]]
+};
+
+function zone(kind, v){
+  if(v == null) return "";
+  if(kind === "temp") return v < 5 ? "kalt" : v < 14 ? "kühl" : v < 21 ? "mild" :
+    v < 27 ? "warm" : v < 33 ? "heiss" : "sehr heiss";
+  if(kind === "dew") return v < 13 ? "trocken" : v < 16 ? "angenehm" : v < 18 ? "spürbar schwül" :
+    v < 21 ? "schwül" : "drückend";
+  if(kind === "wind") return v < 6 ? "flau" : v < 20 ? "leicht" : v < 29 ? "mässig" :
+    v < 39 ? "frisch" : "stark";
+  if(kind === "rain") return v < 4 ? "sehr trocken" : v < 9 ? "trocken" : v < 15 ? "wechselhaft" :
+    v < 22 ? "feucht" : "sehr nass";
+  return "";
+}
+
+function tempColor(t){ return rgb(spectrum(SPECTRA.temp, t)); }
+
+/* Färbt den Seitenhintergrund nach den Zielbedingungen ein. */
+function setAtmos(feelsVal, humidVal){
+  const a = spectrum(SPECTRA.temp, feelsVal);
+  const b = spectrum(SPECTRA.dew, humidVal != null ? humidVal : 12);
+  const dark = matchMedia("(prefers-color-scheme: dark)").matches;
+  const root = document.documentElement;
+  root.style.setProperty("--tintA", rgba(a, dark ? 0.30 : 0.34));
+  root.style.setProperty("--tintB", rgba(b, dark ? 0.28 : 0.20));
 }
 
 /* ---------------- Rendering: Messwerte ---------------- */
 function metricsHTML(o){
-  return '<div class="metrics">' +
-    metric("Tageshoch", fmt(o.tmax, "°C", 0)) +
-    metric("Tagestief", fmt(o.tmin, "°C", 0)) +
-    metric("Gefühlt Tag", fmt(o.feels != null ? o.feels : o.feelsMax, "°C", 0)) +
-    metric("Gefühlt Nacht", fmt(o.feelsMin, "°C", 0)) +
-    metric("Feuchte", fmt(o.rh, " %", 0)) +
-    metric("Wind", fmt(o.wind, " km/h", 0)) +
-    (o.rainDays != null ? metric("Regentage", fmt(o.rainDays, "", 0) + "<small> / Monat</small>") : "") +
-    (o.rainDays != null && o.precip != null ? metric("Niederschlag", fmt(o.precip, " mm", 0)) : "") +
+  const day = o.feels != null ? o.feels : o.feelsMax;
+  return '<div class="stats">' +
+    stat("Tageshoch", fmt(o.tmax, "°", 0), true) +
+    stat("Tagestief", fmt(o.tmin, "°", 0), true) +
+    stat("Gefühlt Tag", fmt(day, "°", 0)) +
+    stat("Gefühlt Nacht", fmt(o.feelsMin, "°", 0)) +
+    stat("Feuchte", fmt(o.rh, "", 0) + "<small> %</small>") +
+    stat("Wind", fmt(o.wind, "", 0) + "<small> km/h</small>") +
+    (o.rainDays != null ? stat("Regentage", fmt(o.rainDays, "", 0) + "<small> /Mt</small>") : "") +
     '</div>';
 }
-function metric(k, v){
-  return '<div class="metric"><div class="k">' + k + '</div><div class="v mono">' + v + '</div></div>';
+function stat(k, v, lead){
+  return '<div class="stat' + (lead ? " lead" : "") + '"><span class="k">' + k +
+    '</span><span class="v">' + v + '</span></div>';
 }
 
 /* ---------------- Rendering: Referenz ---------------- */
@@ -605,32 +718,67 @@ function renderVerdict(){
       (dNight > 0 ? "wärmer" : "kühler") + "</b> als hier.";
   }
 
+  setAtmos(t.feels, t.dew);
+
   box.innerHTML =
     '<div class="verdict"><div class="head">' + placeLabel(state.target) + " im " + MONTHS_LONG[state.tgtMonth] + '</div>' +
     sentence + '</div>' +
-    '<div class="card">' +
-      deltaRow("Gefühlt Tag", dDay, "°C", 14) +
-      deltaRow("Gefühlt Nacht", dNight, "°C", 14) +
-      deltaRow("Tageshoch", t.tmax - r.tmax, "°C", 14) +
-      deltaRow("Tagestief", t.tmin - r.tmin, "°C", 14) +
-      deltaRow("Feuchte", dRh, " %", 40) +
-      deltaRow("Wind", dWind, " km/h", 25) +
-      '<div class="tapnote">Zielwerte: Mittel der letzten 10 Jahre für ' + MONTHS_LONG[state.tgtMonth] + '.</div>' +
+    '<div class="card"><div class="card-label">Auf einer Skala</div>' +
+      '<div class="axis-legend">' +
+        '<span><i style="background:var(--ref)"></i>' +
+          (state.refMode === "now" ? "hier heute" : placeLabel(state.ref)) + '</span>' +
+        '<span><i style="background:var(--ink)"></i>' + placeLabel(state.target) + '</span>' +
+      '</div>' +
+      '<div class="axes">' +
+        axis("Gefühlt am Tag", "temp", 0, 45, rFeelsDay, t.feels, "°") +
+        axis("Gefühlt in der Nacht", "temp", 0, 45, r.feelsMin, t.feelsMin, "°") +
+        axis("Schwüle", "dew", 0, 26, r.dew, t.dew, "°", "Taupunkt") +
+        axis("Wind", "wind", 0, 55, r.wind, t.wind, " km/h") +
+        axis("Regentage pro Monat", "rain", 0, 30, r.rainDays, t.rainDays, "") +
+      '</div>' +
+      '<p class="tapnote">Zielwerte: Mittel der letzten 10 Jahre für ' + MONTHS_LONG[state.tgtMonth] + '.</p>' +
     '</div>';
 }
 
-function deltaRow(k, v, unit, span){
-  if(v == null || !isFinite(v)) return "";
-  const clamped = Math.max(-span, Math.min(span, v));
-  const halfPct = Math.abs(clamped) / span * 50;
-  const style = v >= 0
-    ? "left:50%;width:" + halfPct + "%"
-    : "right:50%;width:" + halfPct + "%";
-  const sign = v > 0 ? "+" : "";
-  return '<div class="delta"><div class="dk">' + k + '</div>' +
-    '<div class="db"><i style="' + style + '"></i><u></u></div>' +
-    '<div class="dv mono">' + sign + round(v, Math.abs(v) < 10 ? 1 : 0) + unit + '</div></div>';
+/* Eine gemeinsame Skala mit zwei Punkten: grau für hier, dunkel für das Ziel.
+   Der Abstand zwischen den Punkten ist die Antwort, die Zahlen sind der Beleg. */
+function axis(label, kind, min, max, refVal, tgtVal, unit, altName){
+  if(tgtVal == null || !isFinite(tgtVal)) return "";
+  const stops = SPECTRA[kind];
+  const pos = v => Math.max(2, Math.min(98, ((v - min) / (max - min)) * 100));
+
+  const grad = stops.map(s => rgb(s[1]) + " " + pos(s[0]).toFixed(1) + "%").join(", ");
+  const pT = pos(tgtVal);
+  const hasRef = refVal != null && isFinite(refVal);
+  const pR = hasRef ? pos(refVal) : null;
+
+  let conn = "";
+  if(hasRef){
+    const a = Math.min(pR, pT), b = Math.max(pR, pT);
+    conn = '<div class="axis-conn" style="left:' + a.toFixed(1) + '%;width:' + (b - a).toFixed(1) + '%"></div>';
+  }
+
+  const gap = hasRef ? tgtVal - refVal : null;
+  const gapTxt = gap == null ? "" :
+    (gap > 0 ? "+" : "") + round(gap, Math.abs(gap) < 10 ? 1 : 0) + unit;
+
+  return '<div class="axis">' +
+    '<div class="axis-head"><span class="ax-label">' + label + (altName ? " · " + altName : "") + '</span>' +
+      (gapTxt ? '<span class="ax-gap">' + gapTxt + '</span>' : '') + '</div>' +
+    '<div class="axis-track" style="background:linear-gradient(90deg,' + grad + ')">' +
+      conn +
+      (hasRef ? '<div class="pin ref" style="left:' + pR.toFixed(1) + '%"><i></i><b>' +
+        fmt(refVal, unit, 0) + '</b></div>' : '') +
+      '<div class="pin tgt" style="left:' + pT.toFixed(1) + '%"><i></i><b>' +
+        fmt(tgtVal, unit, 0) + '</b></div>' +
+    '</div>' +
+    '<div class="axis-foot">' +
+      '<span class="zref">' + (hasRef ? "hier " + zone(kind, refVal) : "") + '</span>' +
+      '<span class="ztgt">dort ' + zone(kind, tgtVal) + '</span>' +
+    '</div>' +
+  '</div>';
 }
+
 
 /* ---------------- Rendering: Jahresprofil ---------------- */
 /* ---------------- Bewertungskriterien ----------------
@@ -735,6 +883,9 @@ async function renderYear(){
       });
     });
 
+    const warm = c.reduce((a, m) => (m.feels != null && (a == null || m.feels > a) ? m.feels : a), null);
+    const dewMean = c.map(m => m.dew).filter(v => v != null);
+    setAtmos(warm, dewMean.length ? dewMean.reduce((s, v) => s + v, 0) / dewMean.length : null);
     renderReco();
   }catch(e){
     box.innerHTML = '<div class="msg err">' + e.message + '</div>';
@@ -848,6 +999,9 @@ async function fetchHourlyMonth(p, month){
 }
 
 /* Kleines Liniendiagramm ohne Bibliothek. */
+const GRID = () => matchMedia("(prefers-color-scheme: dark)").matches ? "rgba(255,255,255,.13)" : "rgba(16,26,30,.10)";
+const AXTX = () => matchMedia("(prefers-color-scheme: dark)").matches ? "#7E9298" : "#8A9895";
+
 function lineChart(series, opts){
   const W = 320, H = 96, padL = 26, padR = 6, padT = 8, padB = 16;
   const all = series.flatMap(s => s.data.filter(v => v != null));
@@ -862,13 +1016,13 @@ function lineChart(series, opts){
   let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="' + opts.label + '">';
   [0, 6, 12, 18].forEach(h => {
     svg += '<line x1="' + x(h).toFixed(1) + '" y1="' + padT + '" x2="' + x(h).toFixed(1) + '" y2="' + (H - padB) +
-      '" stroke="#E4EAE7" stroke-width="1"/>';
-    svg += '<text x="' + x(h).toFixed(1) + '" y="' + (H - 4) + '" font-size="9" fill="#8A9895" text-anchor="middle">' +
+      '" stroke="'+GRID()+'" stroke-width="1"/>';
+    svg += '<text x="' + x(h).toFixed(1) + '" y="' + (H - 4) + '" font-size="9" fill="'+AXTX()+'" text-anchor="middle">' +
       String(h).padStart(2, "0") + '</text>';
   });
-  svg += '<text x="' + (W - padR) + '" y="' + (H - 4) + '" font-size="9" fill="#8A9895" text-anchor="end">23</text>';
+  svg += '<text x="' + (W - padR) + '" y="' + (H - 4) + '" font-size="9" fill="'+AXTX()+'" text-anchor="end">23</text>';
   [hi - (hi - lo) * 0.12, lo + (hi - lo) * 0.12].forEach(v => {
-    svg += '<text x="2" y="' + (y(v) + 3).toFixed(1) + '" font-size="9" fill="#8A9895">' + Math.round(v) + '</text>';
+    svg += '<text x="2" y="' + (y(v) + 3).toFixed(1) + '" font-size="9" fill="'+AXTX()+'">' + Math.round(v) + '</text>';
   });
 
   series.forEach(s => {
@@ -900,11 +1054,11 @@ function barChart(data, color, unit){
   });
   [0, 6, 12, 18].forEach(h => {
     svg += '<text x="' + (padL + h * bw + bw / 2).toFixed(1) + '" y="' + (H - 4) +
-      '" font-size="9" fill="#8A9895" text-anchor="middle">' + String(h).padStart(2, "0") + '</text>';
+      '" font-size="9" fill="'+AXTX()+'" text-anchor="middle">' + String(h).padStart(2, "0") + '</text>';
   });
-  svg += '<text x="2" y="' + (padT + 6) + '" font-size="9" fill="#8A9895">' + Math.round(hi) + unit + '</text>';
+  svg += '<text x="2" y="' + (padT + 6) + '" font-size="9" fill="'+AXTX()+'">' + Math.round(hi) + unit + '</text>';
   svg += '<line x1="' + padL + '" y1="' + (H - padB) + '" x2="' + (W - padR) + '" y2="' + (H - padB) +
-    '" stroke="#E4EAE7" stroke-width="1"/>';
+    '" stroke="'+GRID()+'" stroke-width="1"/>';
   return svg + '</svg>';
 }
 
@@ -1254,6 +1408,10 @@ buildMonths($("tgtMonths"), () => state.tgtMonth, i => { state.tgtMonth = i; ren
     locate(false);
   }
 })();
+
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+  if(state.mode === "compare"){ renderVerdict(); } else if(state.yearClim){ renderYear(); }
+});
 
 if("serviceWorker" in navigator){
   navigator.serviceWorker.register("sw.js").catch(() => {});
