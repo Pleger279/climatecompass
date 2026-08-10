@@ -337,7 +337,7 @@
   </section>
 
   <footer>
-    Klimawerte: Mittel der letzten 10 Jahre (ERA5-Reanalyse).<br>
+    Klimawerte: Mittel der letzten 5 Jahre (ERA5-Reanalyse).<br>
     Wetterdaten von <a href="https://open-meteo.com" target="_blank" rel="noopener">Open-Meteo</a>, CC BY 4.0.<br>
     Karte und Ortsnamen: © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>-Mitwirkende (ODbL),
     Satellitenbilder © Esri.
@@ -389,7 +389,7 @@
 /* ---------------- Konstanten ---------------- */
 const MONTHS = ["Jan","Feb","Mär","Apr","Mai","Jun","Jul","Aug","Sep","Okt","Nov","Dez"];
 const MONTHS_LONG = ["Januar","Februar","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"];
-const YEARS_BACK = 10;
+const YEARS_BACK = 5;
 const CACHE_PREFIX = "kk.clim.";
 const FAV_KEY = "kk.favs";
 const LAST_KEY = "kk.last";
@@ -406,7 +406,7 @@ const state = {
   ref: null,        // {name, country, lat, lon}
   refMonth: new Date().getMonth(),
   refData: null,    // {tmax, tmin, feelsMax, feelsMin, rh, wind}
-  refClim: null,    // Zehnjahresmittel des Referenzorts, für Klimagrössen wie Regentage
+  refClim: null,    // Fünfjahresmittel des Referenzorts, für Klimagrössen wie Regentage
   target: null,
   tgtMonth: (new Date().getMonth() + 2) % 12,
   tgtClim: null,    // 12 Monatsaggregate
@@ -441,13 +441,51 @@ function toggleFav(p){
 function placeLabel(p){ return p ? p.name + (p.country ? ", " + p.country : "") : "–"; }
 function shortName(p){ return p ? p.name : "–"; }
 
-/* ---------------- API ---------------- */
-async function getJSON(url){
-  const r = await fetch(url);
-  if(!r.ok) throw new Error("Server antwortet mit " + r.status);
-  const j = await r.json();
-  if(j.error) throw new Error(j.reason || "Unbekannter Fehler");
-  return j;
+/* ---------------- API ----------------
+   Open-Meteo zählt nicht URLs, sondern gewichtet nach Umfang: Variablen mal Zeitschritte.
+   Darum drosseln wir hier zentral, halten die Zahl gleichzeitiger Anfragen klein und
+   warten bei einer 429-Antwort ab, statt sofort nachzulegen. */
+
+let inFlight = 0, lastCall = 0;
+const MAX_PARALLEL = 2, MIN_GAP = 120;
+
+function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
+
+async function slot(){
+  while(inFlight >= MAX_PARALLEL) await sleep(60);
+  inFlight++;                      // sofort reservieren: zwischen Prüfung und Zählung kein await
+  const wait = Math.max(0, MIN_GAP - (Date.now() - lastCall));
+  if(wait) await sleep(wait);
+  lastCall = Date.now();
+}
+
+async function getJSON(url, tries){
+  const max = tries == null ? 3 : tries;
+  for(let attempt = 0; attempt <= max; attempt++){
+    await slot();
+    try{
+      const r = await fetch(url);
+      if(r.status === 429 || r.status === 503){
+        if(attempt === max) throw new Error("RATE");
+        await sleep([1500, 5000, 12000][Math.min(attempt, 2)]);
+        continue;
+      }
+      if(!r.ok) throw new Error("Server antwortet mit " + r.status);
+      const j = await r.json();
+      if(j.error) throw new Error(j.reason || "Unbekannter Fehler");
+      return j;
+    } finally {
+      inFlight--;
+    }
+  }
+  throw new Error("RATE");
+}
+
+/* Übersetzt technische Fehler in etwas, das man am Handy versteht. */
+function friendlyError(e){
+  return e && e.message === "RATE"
+    ? "Open-Meteo bremst gerade wegen zu vieler Abfragen. In ein bis zwei Minuten geht es wieder – bereits geladene Orte bleiben verfügbar."
+    : (e && e.message) || "Unbekannter Fehler";
 }
 
 async function geocode(q){
@@ -507,12 +545,12 @@ async function fetchToday(p){
 async function fetchClimate(p){
   const key = CACHE_PREFIX + p.lat + "_" + p.lon;
   const cached = load(key, null);
-  if(cached && cached.v === 4 && Date.now() - cached.t < 1000 * 60 * 60 * 24 * 120) return cached.d;
+  if(cached && cached.v === 5 && Date.now() - cached.t < 1000 * 60 * 60 * 24 * 120) return cached.d;
 
   const end = new Date();
   end.setDate(end.getDate() - 7);                 // Archiv hinkt ein paar Tage nach
   const endY = end.getFullYear();
-  const start = (endY - YEARS_BACK) + "-01-01";
+  const start = (endY - YEARS_BACK + 1) + "-01-01";
   const endStr = end.toISOString().slice(0, 10);
 
   const url = "https://archive-api.open-meteo.com/v1/archive?latitude=" + p.lat + "&longitude=" + p.lon +
@@ -665,7 +703,7 @@ async function renderRef(){
         metricsHTML(o);
       renderVerdict();
       // Regentage sind eine Klimagrösse, kein Tageswert – dafür holen wir zusätzlich
-      // das Zehnjahresmittel des Referenzorts. Läuft nach dem Zeichnen, blockiert also nichts.
+      // das Fünfjahresmittel des Referenzorts. Läuft nach dem Zeichnen, blockiert also nichts.
       try{
         state.refClim = await fetchClimate(state.ref);
         renderVerdict();
@@ -676,12 +714,12 @@ async function renderRef(){
       const o = c[state.refMonth];
       state.refData = o;
       box.innerHTML =
-        '<div class="place-sub" style="margin-bottom:8px">' + MONTHS_LONG[state.refMonth] + ' · Mittel 10 Jahre</div>' +
+        '<div class="place-sub" style="margin-bottom:8px">' + MONTHS_LONG[state.refMonth] + ' · Mittel 5 Jahre</div>' +
         metricsHTML(o);
     }
   }catch(e){
     state.refData = null;
-    box.innerHTML = '<div class="msg err">' + e.message + '</div>';
+    box.innerHTML = '<div class="msg err">' + friendlyError(e) + '</div>';
   }
   renderVerdict();
 }
@@ -695,14 +733,14 @@ async function renderTarget(){
     state.tgtClim = await fetchClimate(state.target);
     const o = state.tgtClim[state.tgtMonth];
     box.innerHTML =
-      '<div class="place-sub" style="margin-bottom:8px">' + MONTHS_LONG[state.tgtMonth] + ' · Mittel 10 Jahre</div>' +
+      '<div class="place-sub" style="margin-bottom:8px">' + MONTHS_LONG[state.tgtMonth] + ' · Mittel 5 Jahre</div>' +
       metricsHTML(o) +
       '<button class="ghost" id="tgtDetail" style="width:100%;margin-top:10px">Tagesgang im ' +
       MONTHS_LONG[state.tgtMonth] + ' ansehen</button>';
     $("tgtDetail").addEventListener("click", () => openDetail(state.target, state.tgtMonth));
   }catch(e){
     state.tgtClim = null;
-    box.innerHTML = '<div class="msg err">' + e.message + '</div>';
+    box.innerHTML = '<div class="msg err">' + friendlyError(e) + '</div>';
   }
   renderVerdict();
 }
@@ -759,7 +797,7 @@ function renderVerdict(){
         axis("Wind", "wind", 0, 55, r.wind, t.wind, " km/h") +
         axis(rainLabel, "rain", 0, 30, refRain, t.rainDays, "") +
       '</div>' +
-      '<p class="tapnote">Zielwerte: Mittel der letzten 10 Jahre für ' + MONTHS_LONG[state.tgtMonth] + '.</p>' +
+      '<p class="tapnote">Zielwerte: Mittel der letzten 5 Jahre für ' + MONTHS_LONG[state.tgtMonth] + '.</p>' +
     '</div>';
 }
 
@@ -872,7 +910,7 @@ async function renderYear(){
     state.yearClim = await fetchClimate(state.yearPlace);
     paintYear();
   }catch(e){
-    box.innerHTML = '<div class="msg err">' + e.message + '</div>';
+    box.innerHTML = '<div class="msg err">' + friendlyError(e) + '</div>';
   }
 }
 
@@ -993,12 +1031,12 @@ function renderReco(){
 
 /* ---------------- Detailansicht: Tagesgang eines Monats ---------------- */
 
-/* Holt Stundenwerte für einen Monat über 10 Jahre. Die API kennt nur zusammenhängende
+/* Holt Stundenwerte für einen Monat über mehrere Jahre. Die API kennt nur zusammenhängende
    Zeiträume, deshalb eine Anfrage pro Jahr – parallel und je nur wenige Kilobyte. */
 async function fetchHourlyMonth(p, month){
   const key = "kk.hr." + p.lat + "_" + p.lon + "_" + month;
   const cached = load(key, null);
-  if(cached && cached.v === 1 && Date.now() - cached.t < 1000 * 60 * 60 * 24 * 120) return cached.d;
+  if(cached && cached.v === 2 && Date.now() - cached.t < 1000 * 60 * 60 * 24 * 120) return cached.d;
 
   const endYear = new Date().getFullYear() - 1;
   const years = [];
@@ -1015,6 +1053,9 @@ async function fetchHourlyMonth(p, month){
 
   const settled = await Promise.allSettled(reqs);
   const good = settled.filter(s => s.status === "fulfilled" && s.value && s.value.hourly).map(s => s.value);
+  if(settled.some(s => s.status === "rejected" && s.reason && s.reason.message === "RATE") && !good.length){
+    throw new Error("RATE");
+  }
   if(!good.length) throw new Error("Stundendaten nicht verfügbar.");
 
   const bins = Array.from({ length: 24 }, () => ({ t:[], f:[], w:[], wet:0, n:0 }));
@@ -1039,7 +1080,7 @@ async function fetchHourlyMonth(p, month){
     rain: b.n ? (b.wet / b.n) * 100 : null
   }));
   const res = { hours: out, years: good.length };
-  store(key, { v: 1, t: Date.now(), d: res });
+  store(key, { v: 2, t: Date.now(), d: res });
   return res;
 }
 
@@ -1161,7 +1202,7 @@ async function openDetail(place, month){
     html += '<p class="tapnote">Mittel aus ' + d.years + ' Jahren, Ortszeit am Ziel.</p>';
     $("detailBody").innerHTML = html;
   }catch(e){
-    $("detailBody").innerHTML = '<div class="msg err">' + e.message + '</div>';
+    $("detailBody").innerHTML = '<div class="msg err">' + friendlyError(e) + '</div>';
   }
 }
 
