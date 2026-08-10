@@ -1,6 +1,7 @@
 /* Klimakompass Service Worker: App-Hülle offline halten, Daten immer live holen. */
 const CACHE = "klimakompass-v1";
 const SHELL = ["./", "./index.html", "./manifest.json", "./icon.svg"];
+/* Leaflet und Kartenkacheln liegen auf fremden Servern und werden bewusst nicht gecacht. */
 
 self.addEventListener("install", e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));

@@ -87,6 +87,35 @@
   }
   .months button[aria-pressed="true"]{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:600;}
 
+  /* Karte */
+  #mapCanvas{height:min(58vh,420px);width:100%;background:#E4EAE7;}
+  .map-foot{display:flex;align-items:center;gap:8px;padding:10px 14px 4px;}
+  .map-foot .seg{margin:0;flex:1;}
+  .mapnote{font-size:11px;color:var(--muted);padding:2px 14px 12px;margin:0;line-height:1.45;}
+  .leaflet-container{font:inherit;}
+  button.ghost[disabled]{opacity:.45;}
+
+  /* Detailansicht: Tagesgang */
+  .detail-head{
+    padding:14px 14px 10px;border-bottom:1px solid var(--rule);
+    display:flex;align-items:center;gap:10px;
+  }
+  .detail-head .dt{flex:1;min-width:0;}
+  .detail-head .dt b{font-size:16px;font-weight:650;display:block;}
+  .detail-head .dt span{font-size:12px;color:var(--muted);}
+  .detail-body{max-height:70vh;overflow:auto;padding:4px 14px 14px;}
+  .chart{margin-top:14px;}
+  .chart h3{font-size:12.5px;font-weight:600;margin:0 0 2px;}
+  .chart .ch-sub{font-size:11.5px;color:var(--muted);margin:0 0 6px;}
+  .chart svg{width:100%;display:block;overflow:visible;}
+  .legend-row{display:flex;gap:14px;font-size:11.5px;color:var(--muted);margin-top:4px;}
+  .legend-row i{display:inline-block;width:14px;height:3px;border-radius:2px;vertical-align:middle;margin-right:5px;}
+  .peak{font-size:12px;color:var(--ink);margin-top:6px;line-height:1.45;}
+  .peak b{font-weight:600;}
+  .tapnote{font-size:11.5px;color:var(--muted);margin-top:8px;text-align:center;}
+  .yrow{cursor:pointer;}
+  .yrow:active{background:#F0F4F2;}
+
   /* Messwerte */
   .metrics{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--rule);border-radius:8px;overflow:hidden;}
   .metric{background:var(--panel);padding:9px 10px;}
@@ -222,7 +251,9 @@
 
   <footer>
     Klimawerte: Mittel der letzten 10 Jahre (ERA5-Reanalyse).<br>
-    Wetterdaten von <a href="https://open-meteo.com" target="_blank" rel="noopener">Open-Meteo</a>, CC BY 4.0.
+    Wetterdaten von <a href="https://open-meteo.com" target="_blank" rel="noopener">Open-Meteo</a>, CC BY 4.0.<br>
+    Karte und Ortsnamen: © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>-Mitwirkende (ODbL),
+    Satellitenbilder © Esri.
   </footer>
 </div>
 
@@ -234,8 +265,35 @@
   <div class="dlg-body" id="searchBody"></div>
   <div class="dlg-foot">
     <button class="ghost" id="useGeo">📍 Mein Standort</button>
+    <button class="ghost" id="openMapBtn">🗺 Karte</button>
     <button class="ghost" id="closeDlg">Schliessen</button>
   </div>
+</dialog>
+
+<!-- Ortswahl auf der Karte -->
+<dialog id="mapDlg">
+  <div class="detail-head">
+    <div class="dt"><b>Ort auf der Karte</b><span id="mapSub">Tippe auf die Karte oder einen Favoriten</span></div>
+    <button class="ghost" id="closeMap">Schliessen</button>
+  </div>
+  <div id="mapCanvas"></div>
+  <div class="map-foot">
+    <div class="seg" id="layerSeg">
+      <button data-l="osm" aria-pressed="true">Karte</button>
+      <button data-l="sat" aria-pressed="false">Satellit</button>
+    </div>
+    <button class="ghost" id="usePoint" disabled>Punkt verwenden</button>
+  </div>
+  <p class="mapnote">Die Klimadaten stammen aus einem Raster von rund 25 km Kantenlänge. Zwei Punkte in derselben Rasterzelle liefern identische Werte – die Karte hilft beim Finden namenloser Orte, nicht bei feinerer Auflösung.</p>
+</dialog>
+
+<!-- Detailansicht Tagesgang -->
+<dialog id="detailDlg">
+  <div class="detail-head">
+    <div class="dt"><b id="detTitle">–</b><span id="detSub">–</span></div>
+    <button class="ghost" id="closeDetail">Schliessen</button>
+  </div>
+  <div class="detail-body" id="detailBody"></div>
 </dialog>
 
 <script>
@@ -260,14 +318,15 @@ const state = {
   refMode: "now",
   ref: null,        // {name, country, lat, lon}
   refMonth: new Date().getMonth(),
-  refData: null,    // {temp, feels, rh, wind, label}
+  refData: null,    // {tmax, tmin, feelsMax, feelsMin, rh, wind}
   target: null,
   tgtMonth: (new Date().getMonth() + 2) % 12,
   tgtClim: null,    // 12 Monatsaggregate
   yearPlace: null,
   yearClim: null,
   prio: "balance",
-  pickFor: "target"
+  pickFor: "target",
+  mapPick: null
 };
 
 /* ---------------- Hilfen ---------------- */
@@ -318,22 +377,31 @@ async function reverse(lat, lon){
   return { name: "Mein Standort", country: "", lat: round(lat, 3), lon: round(lon, 3) };
 }
 
-async function fetchNow(p){
+/* Heutige Tageswerte am Referenzort. Feuchte und Windmittel gibt es im Tagespaket
+   der Forecast-API nicht, die mitteln wir selbst aus den Stundenwerten. */
+async function fetchToday(p){
   const url = "https://api.open-meteo.com/v1/forecast?latitude=" + p.lat + "&longitude=" + p.lon +
-    "&current=temperature_2m,relative_humidity_2m,apparent_temperature,wind_speed_10m,weather_code" +
-    "&daily=temperature_2m_max,temperature_2m_min&forecast_days=1&timezone=auto";
+    "&daily=temperature_2m_max,temperature_2m_min,apparent_temperature_max,apparent_temperature_min," +
+    "precipitation_sum,weather_code" +
+    "&hourly=relative_humidity_2m,wind_speed_10m" +
+    "&forecast_days=1&timezone=auto";
   const j = await getJSON(url);
-  const c = j.current || {};
   const d = j.daily || {};
+  const h = j.hourly || {};
+  const avg = a => {
+    const v = (a || []).filter(x => x != null && isFinite(x));
+    return v.length ? v.reduce((s, x) => s + x, 0) / v.length : null;
+  };
+  const first = a => a && a.length ? a[0] : null;
   return {
-    temp: c.temperature_2m,
-    feels: c.apparent_temperature,
-    rh: c.relative_humidity_2m,
-    wind: c.wind_speed_10m,
-    tmax: d.temperature_2m_max ? d.temperature_2m_max[0] : null,
-    tmin: d.temperature_2m_min ? d.temperature_2m_min[0] : null,
-    sky: WCODE[c.weather_code] || "",
-    label: "jetzt"
+    tmax: first(d.temperature_2m_max),
+    tmin: first(d.temperature_2m_min),
+    feelsMax: first(d.apparent_temperature_max),
+    feelsMin: first(d.apparent_temperature_min),
+    precip: first(d.precipitation_sum),
+    rh: avg(h.relative_humidity_2m),
+    wind: avg(h.wind_speed_10m),
+    sky: WCODE[first(d.weather_code)] || ""
   };
 }
 
@@ -341,7 +409,7 @@ async function fetchNow(p){
 async function fetchClimate(p){
   const key = CACHE_PREFIX + p.lat + "_" + p.lon;
   const cached = load(key, null);
-  if(cached && cached.v === 2 && Date.now() - cached.t < 1000 * 60 * 60 * 24 * 120) return cached.d;
+  if(cached && cached.v === 3 && Date.now() - cached.t < 1000 * 60 * 60 * 24 * 120) return cached.d;
 
   const end = new Date();
   end.setDate(end.getDate() - 7);                 // Archiv hinkt ein paar Tage nach
@@ -351,15 +419,15 @@ async function fetchClimate(p){
 
   const url = "https://archive-api.open-meteo.com/v1/archive?latitude=" + p.lat + "&longitude=" + p.lon +
     "&start_date=" + start + "&end_date=" + endStr +
-    "&daily=temperature_2m_max,temperature_2m_min,apparent_temperature_max,relative_humidity_2m_mean," +
-    "wind_speed_10m_mean,precipitation_sum&timezone=auto";
+    "&daily=temperature_2m_max,temperature_2m_min,apparent_temperature_max,apparent_temperature_min," +
+    "relative_humidity_2m_mean,wind_speed_10m_mean,precipitation_sum&timezone=auto";
 
   const j = await getJSON(url);
   const d = j.daily;
   if(!d || !d.time) throw new Error("Keine Archivdaten für diesen Ort.");
 
   const acc = MONTHS.map(() => ({
-    tmax:[], tmin:[], feels:[], rh:[], wind:[], precip:{}, rainDays:{}, years:{}
+    tmax:[], tmin:[], feels:[], feelsMin:[], rh:[], wind:[], precip:{}, rainDays:{}, years:{}
   }));
 
   for(let i = 0; i < d.time.length; i++){
@@ -371,6 +439,7 @@ async function fetchClimate(p){
     push(a.tmax, d.temperature_2m_max[i]);
     push(a.tmin, d.temperature_2m_min[i]);
     push(a.feels, d.apparent_temperature_max[i]);
+    push(a.feelsMin, d.apparent_temperature_min[i]);
     push(a.rh, d.relative_humidity_2m_mean[i]);
     push(a.wind, d.wind_speed_10m_mean[i]);
     const pr = d.precipitation_sum[i];
@@ -388,7 +457,7 @@ async function fetchClimate(p){
     return {
       month: m,
       tmax: mean(a.tmax), tmin: mean(a.tmin),
-      feels: mean(a.feels), rh: mean(a.rh), wind: mean(a.wind),
+      feels: mean(a.feels), feelsMin: mean(a.feelsMin), rh: mean(a.rh), wind: mean(a.wind),
       precip: ys.reduce((s, y) => s + (a.precip[y] || 0), 0) / n,
       rainDays: ys.reduce((s, y) => s + (a.rainDays[y] || 0), 0) / n
     };
@@ -420,12 +489,14 @@ function tempColor(t){
 /* ---------------- Rendering: Messwerte ---------------- */
 function metricsHTML(o){
   return '<div class="metrics">' +
-    metric("Max / Min", fmt(o.tmax, "", 0) + " / " + fmt(o.tmin, "°C", 0)) +
-    metric("Gefühlt", fmt(o.feels, "°C", 0)) +
+    metric("Tageshoch", fmt(o.tmax, "°C", 0)) +
+    metric("Tagestief", fmt(o.tmin, "°C", 0)) +
+    metric("Gefühlt Tag", fmt(o.feels != null ? o.feels : o.feelsMax, "°C", 0)) +
+    metric("Gefühlt Nacht", fmt(o.feelsMin, "°C", 0)) +
     metric("Feuchte", fmt(o.rh, " %", 0)) +
     metric("Wind", fmt(o.wind, " km/h", 0)) +
     (o.rainDays != null ? metric("Regentage", fmt(o.rainDays, "", 0) + "<small> / Monat</small>") : "") +
-    (o.precip != null ? metric("Niederschlag", fmt(o.precip, " mm", 0)) : "") +
+    (o.rainDays != null && o.precip != null ? metric("Niederschlag", fmt(o.precip, " mm", 0)) : "") +
     '</div>';
 }
 function metric(k, v){
@@ -440,17 +511,11 @@ async function renderRef(){
   box.innerHTML = '<div class="skel" style="height:56px"></div>';
   try{
     if(state.refMode === "now"){
-      const o = await fetchNow(state.ref);
+      const o = await fetchToday(state.ref);
       state.refData = o;
       box.innerHTML =
-        '<div class="place-sub" style="margin-bottom:8px">Jetzt · ' + (o.sky || "") + '</div>' +
-        '<div class="metrics">' +
-          metric("Jetzt", fmt(o.temp, "°C", 0)) +
-          metric("Gefühlt", fmt(o.feels, "°C", 0)) +
-          metric("Feuchte", fmt(o.rh, " %", 0)) +
-          metric("Wind", fmt(o.wind, " km/h", 0)) +
-          metric("Heute max/min", fmt(o.tmax, "", 0) + " / " + fmt(o.tmin, "°C", 0)) +
-        '</div>';
+        '<div class="place-sub" style="margin-bottom:8px">Heute' + (o.sky ? " · " + o.sky : "") + '</div>' +
+        metricsHTML(o);
     } else {
       const c = await fetchClimate(state.ref);
       const o = c[state.refMonth];
@@ -476,7 +541,10 @@ async function renderTarget(){
     const o = state.tgtClim[state.tgtMonth];
     box.innerHTML =
       '<div class="place-sub" style="margin-bottom:8px">' + MONTHS_LONG[state.tgtMonth] + ' · Mittel 10 Jahre</div>' +
-      metricsHTML(o);
+      metricsHTML(o) +
+      '<button class="ghost" id="tgtDetail" style="width:100%;margin-top:10px">Tagesgang im ' +
+      MONTHS_LONG[state.tgtMonth] + ' ansehen</button>';
+    $("tgtDetail").addEventListener("click", () => openDetail(state.target, state.tgtMonth));
   }catch(e){
     state.tgtClim = null;
     box.innerHTML = '<div class="msg err">' + e.message + '</div>';
@@ -490,34 +558,37 @@ function renderVerdict(){
   const r = state.refData, t = state.tgtClim ? state.tgtClim[state.tgtMonth] : null;
   if(!r || !t){ box.innerHTML = ""; return; }
 
-  const dFeels = t.feels - r.feels;
+  const rFeelsDay = r.feels != null ? r.feels : r.feelsMax;
+  const dDay = t.feels - rFeelsDay;
+  const dNight = (t.feelsMin != null && r.feelsMin != null) ? t.feelsMin - r.feelsMin : null;
   const dRh = t.rh - r.rh;
   const dWind = t.wind - r.wind;
 
-  const warmer = dFeels >= 1 ? "wärmer" : dFeels <= -1 ? "kühler" : "gleich warm";
+  const warmer = dDay >= 1 ? "wärmer" : dDay <= -1 ? "kühler" : "gleich warm";
   const humid = dRh >= 6 ? "schwüler" : dRh <= -6 ? "trockener" : "ähnlich feucht";
   const windy = dWind >= 4 ? "deutlich windiger" : dWind <= -4 ? "windstiller" : "ähnlich windig";
+  const refWhen = state.refMode === "now" ? "heute bei dir" : "in " + placeLabel(state.ref);
 
-  let sentence;
-  if(Math.abs(dFeels) < 1){
-    sentence = "Gefühlt <b>gleich heiss</b> wie " + (state.refMode === "now" ? "jetzt bei dir" : "in " + placeLabel(state.ref)) +
-               ", aber " + humid + " und " + windy + ".";
-  } else {
-    sentence = "Gefühlt <b>" + Math.abs(round(dFeels, 0)) + " Grad " + warmer + "</b>, dazu " + humid + " und " + windy + ".";
+  let sentence = Math.abs(dDay) < 1
+    ? "Tagsüber gefühlt <b>gleich heiss</b> wie " + refWhen + ", aber " + humid + " und " + windy + "."
+    : "Tagsüber gefühlt <b>" + Math.abs(round(dDay, 0)) + " Grad " + warmer + "</b>, dazu " + humid + " und " + windy + ".";
+
+  if(dNight != null && Math.abs(dNight) >= 1.5){
+    sentence += " Nachts ist es dort <b>" + Math.abs(round(dNight, 0)) + " Grad " +
+      (dNight > 0 ? "wärmer" : "kühler") + "</b> als hier.";
   }
-
-  const caveat = state.refMode === "now"
-    ? '<div style="font-size:11.5px;color:#8FA5A1;margin-top:9px;line-height:1.4">Verglichen wird dein Momentanwert mit dem typischen Tageshoch am Ziel. Am späten Abend fällt der Vergleich deshalb zu günstig aus.</div>'
-    : "";
 
   box.innerHTML =
     '<div class="verdict"><div class="head">' + placeLabel(state.target) + " im " + MONTHS_LONG[state.tgtMonth] + '</div>' +
-    sentence + caveat + '</div>' +
+    sentence + '</div>' +
     '<div class="card">' +
-      deltaRow("Gefühlt", dFeels, "°C", 14) +
-      deltaRow("Tagesmax", (t.tmax - (r.tmax != null ? r.tmax : r.temp)), "°C", 14) +
+      deltaRow("Gefühlt Tag", dDay, "°C", 14) +
+      deltaRow("Gefühlt Nacht", dNight, "°C", 14) +
+      deltaRow("Tageshoch", t.tmax - r.tmax, "°C", 14) +
+      deltaRow("Tagestief", t.tmin - r.tmin, "°C", 14) +
       deltaRow("Feuchte", dRh, " %", 40) +
       deltaRow("Wind", dWind, " km/h", 25) +
+      '<div class="tapnote">Zielwerte: Mittel der letzten 10 Jahre für ' + MONTHS_LONG[state.tgtMonth] + '.</div>' +
     '</div>';
 }
 
@@ -564,7 +635,7 @@ async function renderYear(){
       const rel = (scores[i] - worst) / Math.max(best - worst, 0.001);
       const isBest = rel > 0.82;
       const w = 18 + ((m.feels - lo) / range) * 82;
-      html += '<div class="yrow' + (isBest ? " best" : "") + '">' +
+      html += '<div class="yrow' + (isBest ? " best" : "") + '" data-m="' + i + '" role="button" tabindex="0">' +
         '<div class="ym">' + MONTHS[i] + '</div>' +
         '<div class="ybars">' +
           '<div class="tempbar"><i style="left:0;width:' + w.toFixed(1) + '%;background:' + tempColor(m.feels) + '"></i>' +
@@ -583,11 +654,194 @@ async function renderYear(){
       'Am ' + label + ' ist es in <b>' + placeLabel(state.yearPlace) + '</b> im ' +
       bestMonths.map(i => MONTHS_LONG[i]).join(" und ") + '.</div>';
 
+    html += '<p class="tapnote">Auf einen Monat tippen für den Tagesgang.</p>';
+
     box.innerHTML = html;
+
+    box.querySelectorAll(".yrow").forEach(row => {
+      const m = +row.dataset.m;
+      row.addEventListener("click", () => openDetail(state.yearPlace, m));
+      row.addEventListener("keydown", e => {
+        if(e.key === "Enter" || e.key === " "){ e.preventDefault(); openDetail(state.yearPlace, m); }
+      });
+    });
   }catch(e){
     box.innerHTML = '<div class="msg err">' + e.message + '</div>';
   }
 }
+
+/* ---------------- Detailansicht: Tagesgang eines Monats ---------------- */
+
+/* Holt Stundenwerte für einen Monat über 10 Jahre. Die API kennt nur zusammenhängende
+   Zeiträume, deshalb eine Anfrage pro Jahr – parallel und je nur wenige Kilobyte. */
+async function fetchHourlyMonth(p, month){
+  const key = "kk.hr." + p.lat + "_" + p.lon + "_" + month;
+  const cached = load(key, null);
+  if(cached && cached.v === 1 && Date.now() - cached.t < 1000 * 60 * 60 * 24 * 120) return cached.d;
+
+  const endYear = new Date().getFullYear() - 1;
+  const years = [];
+  for(let y = endYear - YEARS_BACK + 1; y <= endYear; y++) years.push(y);
+  const mm = String(month + 1).padStart(2, "0");
+
+  const reqs = years.map(y => {
+    const last = new Date(y, month + 1, 0).getDate();
+    const url = "https://archive-api.open-meteo.com/v1/archive?latitude=" + p.lat + "&longitude=" + p.lon +
+      "&start_date=" + y + "-" + mm + "-01&end_date=" + y + "-" + mm + "-" + last +
+      "&hourly=temperature_2m,apparent_temperature,wind_speed_10m,precipitation&timezone=auto";
+    return getJSON(url);
+  });
+
+  const settled = await Promise.allSettled(reqs);
+  const good = settled.filter(s => s.status === "fulfilled" && s.value && s.value.hourly).map(s => s.value);
+  if(!good.length) throw new Error("Stundendaten nicht verfügbar.");
+
+  const bins = Array.from({ length: 24 }, () => ({ t:[], f:[], w:[], wet:0, n:0 }));
+  good.forEach(j => {
+    const h = j.hourly;
+    for(let i = 0; i < h.time.length; i++){
+      const hr = parseInt(h.time[i].slice(11, 13), 10);
+      const b = bins[hr];
+      const add = (arr, v) => { if(v != null && isFinite(v)) arr.push(v); };
+      add(b.t, h.temperature_2m[i]);
+      add(b.f, h.apparent_temperature[i]);
+      add(b.w, h.wind_speed_10m[i]);
+      const pr = h.precipitation[i];
+      if(pr != null && isFinite(pr)){ b.n++; if(pr >= 0.1) b.wet++; }
+    }
+  });
+
+  const mean = a => a.length ? a.reduce((s, v) => s + v, 0) / a.length : null;
+  const out = bins.map((b, hr) => ({
+    hour: hr,
+    temp: mean(b.t), feels: mean(b.f), wind: mean(b.w),
+    rain: b.n ? (b.wet / b.n) * 100 : null
+  }));
+  const res = { hours: out, years: good.length };
+  store(key, { v: 1, t: Date.now(), d: res });
+  return res;
+}
+
+/* Kleines Liniendiagramm ohne Bibliothek. */
+function lineChart(series, opts){
+  const W = 320, H = 96, padL = 26, padR = 6, padT = 8, padB = 16;
+  const all = series.flatMap(s => s.data.filter(v => v != null));
+  if(!all.length) return "";
+  let lo = Math.min.apply(null, all), hi = Math.max.apply(null, all);
+  if(opts.zero) lo = Math.min(lo, 0);
+  const span = Math.max(hi - lo, 1);
+  lo -= span * 0.12; hi += span * 0.12;
+  const x = i => padL + (i / 23) * (W - padL - padR);
+  const y = v => padT + (1 - (v - lo) / (hi - lo)) * (H - padT - padB);
+
+  let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="' + opts.label + '">';
+  [0, 6, 12, 18].forEach(h => {
+    svg += '<line x1="' + x(h).toFixed(1) + '" y1="' + padT + '" x2="' + x(h).toFixed(1) + '" y2="' + (H - padB) +
+      '" stroke="#E4EAE7" stroke-width="1"/>';
+    svg += '<text x="' + x(h).toFixed(1) + '" y="' + (H - 4) + '" font-size="9" fill="#8A9895" text-anchor="middle">' +
+      String(h).padStart(2, "0") + '</text>';
+  });
+  svg += '<text x="' + (W - padR) + '" y="' + (H - 4) + '" font-size="9" fill="#8A9895" text-anchor="end">23</text>';
+  [hi - (hi - lo) * 0.12, lo + (hi - lo) * 0.12].forEach(v => {
+    svg += '<text x="2" y="' + (y(v) + 3).toFixed(1) + '" font-size="9" fill="#8A9895">' + Math.round(v) + '</text>';
+  });
+
+  series.forEach(s => {
+    const pts = s.data.map((v, i) => v == null ? null : x(i).toFixed(1) + "," + y(v).toFixed(1)).filter(Boolean);
+    if(s.area){
+      svg += '<polygon points="' + padL + ',' + (H - padB) + ' ' + pts.join(" ") + ' ' + (W - padR) + ',' + (H - padB) +
+        '" fill="' + s.color + '" opacity="0.14"/>';
+    }
+    svg += '<polyline points="' + pts.join(" ") + '" fill="none" stroke="' + s.color +
+      '" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"' +
+      (s.dash ? ' stroke-dasharray="4 3"' : '') + '/>';
+  });
+  return svg + '</svg>';
+}
+
+function barChart(data, color, unit){
+  const W = 320, H = 82, padL = 26, padR = 6, padT = 8, padB = 16;
+  const vals = data.filter(v => v != null);
+  if(!vals.length) return "";
+  const hi = Math.max(Math.max.apply(null, vals), 5) * 1.15;
+  const bw = (W - padL - padR) / 24;
+  let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Regen nach Tageszeit">';
+  data.forEach((v, i) => {
+    if(v == null) return;
+    const h = (v / hi) * (H - padT - padB);
+    svg += '<rect x="' + (padL + i * bw + 0.7).toFixed(1) + '" y="' + (H - padB - h).toFixed(1) +
+      '" width="' + (bw - 1.4).toFixed(1) + '" height="' + Math.max(h, 0.6).toFixed(1) +
+      '" fill="' + color + '" opacity="0.85" rx="1"/>';
+  });
+  [0, 6, 12, 18].forEach(h => {
+    svg += '<text x="' + (padL + h * bw + bw / 2).toFixed(1) + '" y="' + (H - 4) +
+      '" font-size="9" fill="#8A9895" text-anchor="middle">' + String(h).padStart(2, "0") + '</text>';
+  });
+  svg += '<text x="2" y="' + (padT + 6) + '" font-size="9" fill="#8A9895">' + Math.round(hi) + unit + '</text>';
+  svg += '<line x1="' + padL + '" y1="' + (H - padB) + '" x2="' + (W - padR) + '" y2="' + (H - padB) +
+    '" stroke="#E4EAE7" stroke-width="1"/>';
+  return svg + '</svg>';
+}
+
+function extreme(hours, field, dir){
+  let best = null;
+  hours.forEach(h => {
+    if(h[field] == null) return;
+    if(!best || (dir === "max" ? h[field] > best[field] : h[field] < best[field])) best = h;
+  });
+  return best;
+}
+
+async function openDetail(place, month){
+  if(!place) return;
+  $("detTitle").textContent = placeLabel(place);
+  $("detSub").textContent = MONTHS_LONG[month] + " · Tagesgang";
+  $("detailBody").innerHTML = '<div class="skel" style="height:260px;margin-top:12px"></div>';
+  $("detailDlg").showModal();
+  try{
+    const d = await fetchHourlyMonth(place, month);
+    const H = d.hours;
+    const warmest = extreme(H, "feels", "max");
+    const coolest = extreme(H, "feels", "min");
+    const windiest = extreme(H, "wind", "max");
+
+    let html = '';
+    html += '<div class="chart"><h3>Temperatur über den Tag</h3>' +
+      '<p class="ch-sub">Durchgezogen gemessen, gestrichelt gefühlt</p>' +
+      lineChart([
+        { data: H.map(h => h.temp), color: "#0E7C7B" },
+        { data: H.map(h => h.feels), color: "#D9702B", dash: true }
+      ], { label: "Tagesgang Temperatur" }) +
+      '<div class="legend-row"><span><i style="background:#0E7C7B"></i>gemessen</span>' +
+      '<span><i style="background:#D9702B"></i>gefühlt</span></div>';
+    if(warmest && coolest){
+      html += '<p class="peak">Gefühlt am heissesten um <b>' + String(warmest.hour).padStart(2, "0") + ':00</b> mit ' +
+        fmt(warmest.feels, "°C", 0) + ', am kühlsten um <b>' + String(coolest.hour).padStart(2, "0") + ':00</b> mit ' +
+        fmt(coolest.feels, "°C", 0) + '.</p>';
+    }
+    html += '</div>';
+
+    html += '<div class="chart"><h3>Wind über den Tag</h3>' +
+      '<p class="ch-sub">Mittlere Windgeschwindigkeit in km/h</p>' +
+      lineChart([{ data: H.map(h => h.wind), color: "#41504C", area: true }], { label: "Tagesgang Wind", zero: true });
+    if(windiest){
+      html += '<p class="peak">Am windigsten um <b>' + String(windiest.hour).padStart(2, "0") + ':00</b> mit ' +
+        fmt(windiest.wind, " km/h", 0) + '.</p>';
+    }
+    html += '</div>';
+
+    html += '<div class="chart"><h3>Regen nach Tageszeit</h3>' +
+      '<p class="ch-sub">Anteil der Stunden mit Niederschlag</p>' +
+      barChart(H.map(h => h.rain), "#4A7FB5", "%") + '</div>';
+
+    html += '<p class="tapnote">Mittel aus ' + d.years + ' Jahren, Ortszeit am Ziel.</p>';
+    $("detailBody").innerHTML = html;
+  }catch(e){
+    $("detailBody").innerHTML = '<div class="msg err">' + e.message + '</div>';
+  }
+}
+
+$("closeDetail").addEventListener("click", () => $("detailDlg").close());
 
 /* ---------------- Monatsleisten ---------------- */
 function buildMonths(el, getSel, onPick){
@@ -673,6 +927,126 @@ $("searchInput").addEventListener("input", e => {
 });
 $("closeDlg").addEventListener("click", () => dlg.close());
 $("useGeo").addEventListener("click", () => locate(true));
+
+/* ---------------- Karte ---------------- */
+let leafletReady = false, map = null, pickMarker = null, favLayer = null, baseLayers = {};
+let lastReverse = 0;
+
+function loadLeaflet(){
+  if(leafletReady) return Promise.resolve();
+  return new Promise((res, rej) => {
+    const css = document.createElement("link");
+    css.rel = "stylesheet";
+    css.href = "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css";
+    document.head.appendChild(css);
+    const s = document.createElement("script");
+    s.src = "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js";
+    s.onload = () => { leafletReady = true; res(); };
+    s.onerror = () => rej(new Error("Karte konnte nicht geladen werden."));
+    document.head.appendChild(s);
+  });
+}
+
+/* Nominatim erlaubt höchstens eine Anfrage pro Sekunde; die Sperre hält das ein.
+   Der Referer der GitHub-Pages-Adresse identifiziert die App, wie die Richtlinie es verlangt. */
+async function reverseName(lat, lon){
+  const wait = Math.max(0, 1100 - (Date.now() - lastReverse));
+  if(wait) await new Promise(r => setTimeout(r, wait));
+  lastReverse = Date.now();
+  const url = "https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=12&accept-language=de" +
+    "&lat=" + lat + "&lon=" + lon;
+  try{
+    const r = await fetch(url);
+    if(!r.ok) throw new Error();
+    const j = await r.json();
+    const a = j.address || {};
+    const name = a.village || a.town || a.city || a.municipality || a.county || a.state ||
+                 (j.name || "").split(",")[0] || null;
+    return name ? { name, country: a.country || "" } : null;
+  }catch(e){ return null; }
+}
+
+function coordLabel(lat, lon){
+  const ns = lat >= 0 ? "N" : "S", ew = lon >= 0 ? "O" : "W";
+  return Math.abs(lat).toFixed(2) + "° " + ns + " " + Math.abs(lon).toFixed(2) + "° " + ew;
+}
+
+async function openMap(){
+  $("mapDlg").showModal();
+  $("mapSub").textContent = "Karte wird geladen…";
+  $("usePoint").disabled = true;
+  state.mapPick = null;
+
+  try{ await loadLeaflet(); }
+  catch(e){ $("mapSub").textContent = e.message; return; }
+
+  if(!map){
+    map = L.map("mapCanvas", { zoomControl: true, attributionControl: true });
+    baseLayers.osm = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 18, attribution: "© OpenStreetMap"
+    });
+    baseLayers.sat = L.tileLayer(
+      "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
+      maxZoom: 18, attribution: "Kacheln © Esri"
+    });
+    baseLayers.osm.addTo(map);
+    favLayer = L.layerGroup().addTo(map);
+
+    map.on("click", async e => {
+      const lat = round(e.latlng.lat, 3), lon = round(e.latlng.lng, 3);
+      if(pickMarker) map.removeLayer(pickMarker);
+      pickMarker = L.marker([lat, lon]).addTo(map);
+      state.mapPick = { name: coordLabel(lat, lon), country: "", lat, lon };
+      $("usePoint").disabled = false;
+      $("mapSub").textContent = "Name wird gesucht… · " + coordLabel(lat, lon);
+      const hit = await reverseName(lat, lon);
+      // Nur übernehmen, wenn der Nutzer inzwischen nicht woanders hingetippt hat.
+      if(state.mapPick && state.mapPick.lat === lat && state.mapPick.lon === lon){
+        if(hit){ state.mapPick.name = hit.name; state.mapPick.country = hit.country; }
+        $("mapSub").textContent = placeLabel(state.mapPick) + " · " + coordLabel(lat, lon);
+      }
+    });
+  }
+
+  // Favoriten als Markierungen
+  favLayer.clearLayers();
+  const f = favs();
+  f.forEach(p => {
+    L.circleMarker([p.lat, p.lon], {
+      radius: 7, color: "#0E7C7B", weight: 2, fillColor: "#0E7C7B", fillOpacity: 0.55
+    }).addTo(favLayer).bindTooltip(p.name).on("click", ev => {
+      L.DomEvent.stopPropagation(ev);
+      state.mapPick = p;
+      $("usePoint").disabled = false;
+      $("mapSub").textContent = placeLabel(p) + " · Favorit";
+    });
+  });
+
+  // Startausschnitt: aktuelle Auswahl, sonst Favoriten, sonst Weltansicht
+  const focus = state.pickFor === "ref" ? state.ref : state.pickFor === "year" ? state.yearPlace : state.target;
+  setTimeout(() => {
+    map.invalidateSize();
+    if(focus) map.setView([focus.lat, focus.lon], 8);
+    else if(f.length) map.fitBounds(f.map(p => [p.lat, p.lon]), { padding: [40, 40], maxZoom: 8 });
+    else map.setView([30, 10], 2);
+    $("mapSub").textContent = "Tippe auf die Karte oder einen Favoriten";
+  }, 90);
+}
+
+$("openMapBtn").addEventListener("click", () => { dlg.close(); openMap(); });
+$("closeMap").addEventListener("click", () => $("mapDlg").close());
+$("usePoint").addEventListener("click", () => {
+  if(!state.mapPick) return;
+  $("mapDlg").close();
+  choosePlace(state.mapPick);
+});
+$("layerSeg").addEventListener("click", e => {
+  const b = e.target.closest("button"); if(!b || !map) return;
+  Array.from($("layerSeg").children).forEach(c => c.setAttribute("aria-pressed", c === b ? "true" : "false"));
+  const want = b.dataset.l, other = want === "osm" ? "sat" : "osm";
+  if(map.hasLayer(baseLayers[other])) map.removeLayer(baseLayers[other]);
+  if(!map.hasLayer(baseLayers[want])) baseLayers[want].addTo(map);
+});
 
 /* ---------------- Standort ---------------- */
 function locate(fromDialog){
