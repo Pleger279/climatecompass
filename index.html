@@ -1,0 +1,771 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#10201F">
+<meta name="description" content="Vergleicht das aktuelle Wetter mit dem Klima eines Reiseziels.">
+<link rel="manifest" href="manifest.json">
+<title>Klimakompass</title>
+<style>
+  :root{
+    --bg:#F4F6F5;
+    --panel:#FFFFFF;
+    --ink:#14201E;
+    --muted:#697A76;
+    --rule:#DBE2DF;
+    --accent:#0E7C7B;
+    --ref:#41504C;
+    --warn:#B4400C;
+    --radius:10px;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--bg);
+    color:var(--ink);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    font-size:15px;line-height:1.45;
+    padding:0 0 48px;
+    -webkit-text-size-adjust:100%;
+  }
+  .wrap{max-width:640px;margin:0 auto;padding:0 14px;}
+  .mono{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;font-variant-numeric:tabular-nums;}
+
+  header{
+    padding:calc(14px + env(safe-area-inset-top)) 0 10px;
+  }
+  h1{font-size:17px;font-weight:650;letter-spacing:-0.01em;margin:0;}
+  h1 span{color:var(--accent);}
+  .tagline{font-size:12.5px;color:var(--muted);margin:2px 0 0;}
+
+  /* Modus-Umschalter */
+  .modes{display:flex;gap:0;background:#E5EAE8;border-radius:var(--radius);padding:3px;margin:14px 0 16px;}
+  .modes button{
+    flex:1;border:0;background:transparent;padding:9px 6px;border-radius:7px;
+    font:inherit;font-size:13.5px;font-weight:550;color:var(--muted);cursor:pointer;
+  }
+  .modes button[aria-selected="true"]{background:var(--panel);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.08);}
+
+  .card{
+    background:var(--panel);border-radius:var(--radius);
+    padding:14px;margin-bottom:12px;border:1px solid var(--rule);
+  }
+  .card-label{
+    font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;
+    font-weight:700;color:var(--muted);margin-bottom:8px;display:flex;align-items:center;gap:8px;
+  }
+  .card.reference{border-left:3px solid var(--ref);}
+  .card.reference .card-label{color:var(--ref);}
+  .card.target{border-left:3px solid var(--accent);}
+  .card.target .card-label{color:var(--accent);}
+
+  .place-row{display:flex;align-items:center;gap:8px;margin-bottom:10px;}
+  .place-name{font-size:16px;font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .place-sub{font-size:12px;color:var(--muted);font-weight:400;}
+
+  button.ghost{
+    border:1px solid var(--rule);background:var(--panel);color:var(--ink);
+    border-radius:7px;padding:7px 10px;font:inherit;font-size:13px;cursor:pointer;
+  }
+  button.ghost:active{background:#EEF2F0;}
+  button.star{border:0;background:none;font-size:19px;line-height:1;cursor:pointer;padding:2px 4px;color:var(--rule);}
+  button.star.on{color:#E0A421;}
+
+  .seg{display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap;}
+  .seg button{
+    border:1px solid var(--rule);background:var(--panel);border-radius:20px;
+    padding:5px 12px;font:inherit;font-size:12.5px;color:var(--muted);cursor:pointer;
+  }
+  .seg button[aria-pressed="true"]{background:var(--ink);color:#fff;border-color:var(--ink);}
+
+  /* Monatswahl */
+  .months{display:grid;grid-template-columns:repeat(6,1fr);gap:5px;margin-bottom:12px;}
+  .months button{
+    border:1px solid var(--rule);background:var(--panel);border-radius:6px;
+    padding:7px 2px;font:inherit;font-size:12px;color:var(--muted);cursor:pointer;
+  }
+  .months button[aria-pressed="true"]{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:600;}
+
+  /* Messwerte */
+  .metrics{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--rule);border-radius:8px;overflow:hidden;}
+  .metric{background:var(--panel);padding:9px 10px;}
+  .metric .k{font-size:11px;color:var(--muted);}
+  .metric .v{font-size:18px;font-weight:600;margin-top:1px;}
+  .metric .v small{font-size:12px;font-weight:400;color:var(--muted);}
+
+  /* Verdikt */
+  .verdict{
+    background:var(--ink);color:#F2F5F4;border-radius:var(--radius);
+    padding:14px;margin-bottom:12px;font-size:15px;line-height:1.5;
+  }
+  .verdict b{color:#7FD1CE;font-weight:600;}
+  .verdict .head{font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:#8FA5A1;margin-bottom:6px;}
+
+  /* Delta-Liste */
+  .deltas{display:flex;flex-direction:column;gap:0;}
+  .delta{display:flex;align-items:center;gap:10px;padding:9px 0;border-top:1px solid var(--rule);}
+  .delta:first-child{border-top:0;}
+  .delta .dk{font-size:12.5px;color:var(--muted);width:78px;flex:none;}
+  .delta .db{flex:1;height:16px;position:relative;background:#EDF1EF;border-radius:3px;overflow:hidden;}
+  .delta .db i{position:absolute;top:0;bottom:0;background:var(--accent);opacity:.8;}
+  .delta .db u{position:absolute;top:0;bottom:0;width:1px;left:50%;background:#B9C4C1;}
+  .delta .dv{font-size:13px;font-weight:600;width:72px;text-align:right;flex:none;}
+
+  /* Jahresprofil */
+  .yearlist{display:flex;flex-direction:column;}
+  .yrow{display:grid;grid-template-columns:34px 1fr;gap:8px;align-items:center;padding:5px 0;border-top:1px solid var(--rule);}
+  .yrow:first-child{border-top:0;}
+  .yrow.best .ym{color:var(--accent);font-weight:700;}
+  .ym{font-size:12px;color:var(--muted);font-weight:600;}
+  .ybars{display:grid;grid-template-columns:1fr;gap:3px;}
+  .tempbar{position:relative;height:19px;border-radius:3px;background:#EDF1EF;overflow:hidden;}
+  .tempbar i{position:absolute;top:0;bottom:0;border-radius:3px;}
+  .tempbar span{position:absolute;right:6px;top:50%;transform:translateY(-50%);font-size:11.5px;font-weight:600;}
+  .ymeta{display:flex;gap:10px;font-size:11px;color:var(--muted);}
+  .ymeta b{font-weight:600;color:var(--ink);}
+
+  .scale{display:flex;justify-content:space-between;font-size:10.5px;color:var(--muted);margin-top:6px;}
+
+  /* Suche */
+  dialog{
+    border:0;border-radius:12px;padding:0;width:min(94vw,460px);
+    background:var(--panel);color:var(--ink);box-shadow:0 12px 40px rgba(0,0,0,.28);
+  }
+  dialog::backdrop{background:rgba(10,20,18,.5);}
+  .dlg-head{padding:14px 14px 10px;border-bottom:1px solid var(--rule);}
+  .dlg-head input{
+    width:100%;font:inherit;font-size:16px;padding:10px 12px;
+    border:1px solid var(--rule);border-radius:8px;background:var(--bg);color:var(--ink);
+  }
+  .dlg-body{max-height:56vh;overflow:auto;}
+  .res{padding:11px 14px;border-bottom:1px solid var(--rule);cursor:pointer;display:flex;align-items:center;gap:8px;}
+  .res:active{background:#EEF2F0;}
+  .res .rn{font-weight:550;}
+  .res .rs{font-size:12px;color:var(--muted);}
+  .dlg-foot{padding:10px 14px;display:flex;justify-content:space-between;align-items:center;}
+  .sec-label{font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);padding:10px 14px 4px;font-weight:700;}
+
+  .msg{font-size:13px;color:var(--muted);padding:14px;text-align:center;}
+  .msg.err{color:var(--warn);}
+  .skel{height:14px;background:linear-gradient(90deg,#E9EEEC,#F4F7F6,#E9EEEC);background-size:200% 100%;animation:sh 1.2s infinite;border-radius:4px;}
+  @keyframes sh{0%{background-position:200% 0}100%{background-position:-200% 0}}
+  @media (prefers-reduced-motion:reduce){.skel{animation:none}}
+
+  footer{font-size:11.5px;color:var(--muted);text-align:center;padding:18px 14px 0;line-height:1.6;}
+  footer a{color:var(--muted);}
+  :focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+  .hidden{display:none !important;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>Klima<span>kompass</span></h1>
+    <p class="tagline">Ist es dort dann auch so wie hier jetzt?</p>
+  </header>
+
+  <div class="modes" role="tablist">
+    <button role="tab" id="tabCompare" aria-selected="true">Vergleich</button>
+    <button role="tab" id="tabYear" aria-selected="false">Jahresprofil</button>
+  </div>
+
+  <!-- ============ VERGLEICHSMODUS ============ -->
+  <section id="viewCompare">
+
+    <div class="card reference">
+      <div class="card-label">Referenz</div>
+      <div class="seg" id="refModeSeg">
+        <button data-m="now" aria-pressed="true">Jetzt &amp; hier</button>
+        <button data-m="period" aria-pressed="false">Ort &amp; Monat</button>
+      </div>
+      <div class="place-row">
+        <div class="place-name" id="refName">Standort wird ermittelt…</div>
+        <button class="ghost" id="refPick">Ändern</button>
+      </div>
+      <div class="months hidden" id="refMonths"></div>
+      <div id="refBody"><div class="skel" style="height:56px"></div></div>
+    </div>
+
+    <div class="card target">
+      <div class="card-label">Reiseziel</div>
+      <div class="place-row">
+        <div class="place-name" id="tgtName">Ziel wählen</div>
+        <button class="star" id="tgtStar" title="Als Favorit merken">☆</button>
+        <button class="ghost" id="tgtPick">Suchen</button>
+      </div>
+      <div class="months" id="tgtMonths"></div>
+      <div id="tgtBody"><div class="msg">Wähle ein Reiseziel.</div></div>
+    </div>
+
+    <div id="verdictBox"></div>
+  </section>
+
+  <!-- ============ JAHRESPROFIL ============ -->
+  <section id="viewYear" class="hidden">
+    <div class="card target">
+      <div class="card-label">Jahresprofil</div>
+      <div class="place-row">
+        <div class="place-name" id="yrName">Ort wählen</div>
+        <button class="star" id="yrStar" title="Als Favorit merken">☆</button>
+        <button class="ghost" id="yrPick">Suchen</button>
+      </div>
+      <div class="seg" id="prioSeg">
+        <button data-p="balance" aria-pressed="true">Ausgewogen</button>
+        <button data-p="dry" aria-pressed="false">Trocken</button>
+        <button data-p="wind" aria-pressed="false">Viel Wind</button>
+      </div>
+      <div id="yrBody"><div class="msg">Wähle einen Ort, um alle zwölf Monate zu sehen.</div></div>
+    </div>
+  </section>
+
+  <footer>
+    Klimawerte: Mittel der letzten 10 Jahre (ERA5-Reanalyse).<br>
+    Wetterdaten von <a href="https://open-meteo.com" target="_blank" rel="noopener">Open-Meteo</a>, CC BY 4.0.
+  </footer>
+</div>
+
+<!-- Suchdialog -->
+<dialog id="searchDlg">
+  <div class="dlg-head">
+    <input type="search" id="searchInput" placeholder="Ort suchen…" autocomplete="off" enterkeyhint="search">
+  </div>
+  <div class="dlg-body" id="searchBody"></div>
+  <div class="dlg-foot">
+    <button class="ghost" id="useGeo">📍 Mein Standort</button>
+    <button class="ghost" id="closeDlg">Schliessen</button>
+  </div>
+</dialog>
+
+<script>
+"use strict";
+
+/* ---------------- Konstanten ---------------- */
+const MONTHS = ["Jan","Feb","Mär","Apr","Mai","Jun","Jul","Aug","Sep","Okt","Nov","Dez"];
+const MONTHS_LONG = ["Januar","Februar","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"];
+const YEARS_BACK = 10;
+const CACHE_PREFIX = "kk.clim.";
+const FAV_KEY = "kk.favs";
+const LAST_KEY = "kk.last";
+
+const WCODE = {0:"klar",1:"meist klar",2:"teils bewölkt",3:"bedeckt",45:"Nebel",48:"Reifnebel",
+  51:"Niesel",53:"Niesel",55:"Niesel",61:"Regen",63:"Regen",65:"starker Regen",
+  71:"Schnee",73:"Schnee",75:"starker Schnee",80:"Schauer",81:"Schauer",82:"heftige Schauer",
+  95:"Gewitter",96:"Gewitter",99:"schweres Gewitter"};
+
+/* ---------------- Zustand ---------------- */
+const state = {
+  mode: "compare",
+  refMode: "now",
+  ref: null,        // {name, country, lat, lon}
+  refMonth: new Date().getMonth(),
+  refData: null,    // {temp, feels, rh, wind, label}
+  target: null,
+  tgtMonth: (new Date().getMonth() + 2) % 12,
+  tgtClim: null,    // 12 Monatsaggregate
+  yearPlace: null,
+  yearClim: null,
+  prio: "balance",
+  pickFor: "target"
+};
+
+/* ---------------- Hilfen ---------------- */
+const $ = id => document.getElementById(id);
+const round = (v, d = 0) => v == null || !isFinite(v) ? null : Math.round(v * 10 ** d) / 10 ** d;
+const fmt = (v, unit = "", d = 0) => v == null ? "–" : round(v, d) + unit;
+
+function store(key, val){
+  try { localStorage.setItem(key, JSON.stringify(val)); } catch(e){ /* voll oder gesperrt */ }
+}
+function load(key, fallback){
+  try { const s = localStorage.getItem(key); return s ? JSON.parse(s) : fallback; }
+  catch(e){ return fallback; }
+}
+function favs(){ return load(FAV_KEY, []); }
+function isFav(p){ return p && favs().some(f => f.lat === p.lat && f.lon === p.lon); }
+function toggleFav(p){
+  if(!p) return;
+  let f = favs();
+  f = isFav(p) ? f.filter(x => !(x.lat === p.lat && x.lon === p.lon)) : [...f, p];
+  store(FAV_KEY, f.slice(0, 40));
+}
+function placeLabel(p){ return p ? p.name + (p.country ? ", " + p.country : "") : "–"; }
+
+/* ---------------- API ---------------- */
+async function getJSON(url){
+  const r = await fetch(url);
+  if(!r.ok) throw new Error("Server antwortet mit " + r.status);
+  const j = await r.json();
+  if(j.error) throw new Error(j.reason || "Unbekannter Fehler");
+  return j;
+}
+
+async function geocode(q){
+  const url = "https://geocoding-api.open-meteo.com/v1/search?count=8&language=de&format=json&name=" + encodeURIComponent(q);
+  const j = await getJSON(url);
+  return (j.results || []).map(r => ({
+    name: r.name,
+    country: r.country || "",
+    admin: r.admin1 || "",
+    lat: round(r.latitude, 3),
+    lon: round(r.longitude, 3)
+  }));
+}
+
+async function reverse(lat, lon){
+  // Open-Meteo hat kein Reverse-Geocoding; wir zeigen die Koordinaten an.
+  return { name: "Mein Standort", country: "", lat: round(lat, 3), lon: round(lon, 3) };
+}
+
+async function fetchNow(p){
+  const url = "https://api.open-meteo.com/v1/forecast?latitude=" + p.lat + "&longitude=" + p.lon +
+    "&current=temperature_2m,relative_humidity_2m,apparent_temperature,wind_speed_10m,weather_code" +
+    "&daily=temperature_2m_max,temperature_2m_min&forecast_days=1&timezone=auto";
+  const j = await getJSON(url);
+  const c = j.current || {};
+  const d = j.daily || {};
+  return {
+    temp: c.temperature_2m,
+    feels: c.apparent_temperature,
+    rh: c.relative_humidity_2m,
+    wind: c.wind_speed_10m,
+    tmax: d.temperature_2m_max ? d.temperature_2m_max[0] : null,
+    tmin: d.temperature_2m_min ? d.temperature_2m_min[0] : null,
+    sky: WCODE[c.weather_code] || "",
+    label: "jetzt"
+  };
+}
+
+/* Holt 10 Jahre Tageswerte und aggregiert sie zu 12 Monatsmitteln. */
+async function fetchClimate(p){
+  const key = CACHE_PREFIX + p.lat + "_" + p.lon;
+  const cached = load(key, null);
+  if(cached && cached.v === 2 && Date.now() - cached.t < 1000 * 60 * 60 * 24 * 120) return cached.d;
+
+  const end = new Date();
+  end.setDate(end.getDate() - 7);                 // Archiv hinkt ein paar Tage nach
+  const endY = end.getFullYear();
+  const start = (endY - YEARS_BACK) + "-01-01";
+  const endStr = end.toISOString().slice(0, 10);
+
+  const url = "https://archive-api.open-meteo.com/v1/archive?latitude=" + p.lat + "&longitude=" + p.lon +
+    "&start_date=" + start + "&end_date=" + endStr +
+    "&daily=temperature_2m_max,temperature_2m_min,apparent_temperature_max,relative_humidity_2m_mean," +
+    "wind_speed_10m_mean,precipitation_sum&timezone=auto";
+
+  const j = await getJSON(url);
+  const d = j.daily;
+  if(!d || !d.time) throw new Error("Keine Archivdaten für diesen Ort.");
+
+  const acc = MONTHS.map(() => ({
+    tmax:[], tmin:[], feels:[], rh:[], wind:[], precip:{}, rainDays:{}, years:{}
+  }));
+
+  for(let i = 0; i < d.time.length; i++){
+    const dt = d.time[i];
+    const m = parseInt(dt.slice(5, 7), 10) - 1;
+    const y = dt.slice(0, 4);
+    const a = acc[m];
+    const push = (arr, v) => { if(v != null && isFinite(v)) arr.push(v); };
+    push(a.tmax, d.temperature_2m_max[i]);
+    push(a.tmin, d.temperature_2m_min[i]);
+    push(a.feels, d.apparent_temperature_max[i]);
+    push(a.rh, d.relative_humidity_2m_mean[i]);
+    push(a.wind, d.wind_speed_10m_mean[i]);
+    const pr = d.precipitation_sum[i];
+    if(pr != null && isFinite(pr)){
+      a.precip[y] = (a.precip[y] || 0) + pr;
+      if(pr >= 1) a.rainDays[y] = (a.rainDays[y] || 0) + 1;
+      a.years[y] = true;
+    }
+  }
+
+  const mean = arr => arr.length ? arr.reduce((s, v) => s + v, 0) / arr.length : null;
+  const out = acc.map((a, m) => {
+    const ys = Object.keys(a.years);
+    const n = ys.length || 1;
+    return {
+      month: m,
+      tmax: mean(a.tmax), tmin: mean(a.tmin),
+      feels: mean(a.feels), rh: mean(a.rh), wind: mean(a.wind),
+      precip: ys.reduce((s, y) => s + (a.precip[y] || 0), 0) / n,
+      rainDays: ys.reduce((s, y) => s + (a.rainDays[y] || 0), 0) / n
+    };
+  });
+
+  store(key, { v: 2, t: Date.now(), d: out });
+  return out;
+}
+
+/* ---------------- Farbskala ---------------- */
+function tempColor(t){
+  if(t == null) return "#CBD3CF";
+  const stops = [[5,"#4A7FB5"],[15,"#5AA6A4"],[22,"#79B36A"],[28,"#E0A421"],[33,"#D9702B"],[40,"#B03A2E"]];
+  if(t <= stops[0][0]) return stops[0][1];
+  if(t >= stops[stops.length-1][0]) return stops[stops.length-1][1];
+  for(let i = 0; i < stops.length - 1; i++){
+    const [a, ca] = stops[i], [b, cb] = stops[i+1];
+    if(t >= a && t <= b){
+      const f = (t - a) / (b - a);
+      const hex = c => [parseInt(c.slice(1,3),16), parseInt(c.slice(3,5),16), parseInt(c.slice(5,7),16)];
+      const A = hex(ca), B = hex(cb);
+      const mix = A.map((v, k) => Math.round(v + (B[k] - v) * f));
+      return "rgb(" + mix.join(",") + ")";
+    }
+  }
+  return "#CBD3CF";
+}
+
+/* ---------------- Rendering: Messwerte ---------------- */
+function metricsHTML(o){
+  return '<div class="metrics">' +
+    metric("Max / Min", fmt(o.tmax, "", 0) + " / " + fmt(o.tmin, "°C", 0)) +
+    metric("Gefühlt", fmt(o.feels, "°C", 0)) +
+    metric("Feuchte", fmt(o.rh, " %", 0)) +
+    metric("Wind", fmt(o.wind, " km/h", 0)) +
+    (o.rainDays != null ? metric("Regentage", fmt(o.rainDays, "", 0) + "<small> / Monat</small>") : "") +
+    (o.precip != null ? metric("Niederschlag", fmt(o.precip, " mm", 0)) : "") +
+    '</div>';
+}
+function metric(k, v){
+  return '<div class="metric"><div class="k">' + k + '</div><div class="v mono">' + v + '</div></div>';
+}
+
+/* ---------------- Rendering: Referenz ---------------- */
+async function renderRef(){
+  const box = $("refBody");
+  $("refMonths").classList.toggle("hidden", state.refMode === "now");
+  if(!state.ref){ box.innerHTML = '<div class="msg">Kein Ort gewählt.</div>'; return; }
+  box.innerHTML = '<div class="skel" style="height:56px"></div>';
+  try{
+    if(state.refMode === "now"){
+      const o = await fetchNow(state.ref);
+      state.refData = o;
+      box.innerHTML =
+        '<div class="place-sub" style="margin-bottom:8px">Jetzt · ' + (o.sky || "") + '</div>' +
+        '<div class="metrics">' +
+          metric("Jetzt", fmt(o.temp, "°C", 0)) +
+          metric("Gefühlt", fmt(o.feels, "°C", 0)) +
+          metric("Feuchte", fmt(o.rh, " %", 0)) +
+          metric("Wind", fmt(o.wind, " km/h", 0)) +
+          metric("Heute max/min", fmt(o.tmax, "", 0) + " / " + fmt(o.tmin, "°C", 0)) +
+        '</div>';
+    } else {
+      const c = await fetchClimate(state.ref);
+      const o = c[state.refMonth];
+      state.refData = o;
+      box.innerHTML =
+        '<div class="place-sub" style="margin-bottom:8px">' + MONTHS_LONG[state.refMonth] + ' · Mittel 10 Jahre</div>' +
+        metricsHTML(o);
+    }
+  }catch(e){
+    state.refData = null;
+    box.innerHTML = '<div class="msg err">' + e.message + '</div>';
+  }
+  renderVerdict();
+}
+
+/* ---------------- Rendering: Ziel ---------------- */
+async function renderTarget(){
+  const box = $("tgtBody");
+  if(!state.target){ box.innerHTML = '<div class="msg">Wähle ein Reiseziel.</div>'; return; }
+  box.innerHTML = '<div class="skel" style="height:56px"></div>';
+  try{
+    state.tgtClim = await fetchClimate(state.target);
+    const o = state.tgtClim[state.tgtMonth];
+    box.innerHTML =
+      '<div class="place-sub" style="margin-bottom:8px">' + MONTHS_LONG[state.tgtMonth] + ' · Mittel 10 Jahre</div>' +
+      metricsHTML(o);
+  }catch(e){
+    state.tgtClim = null;
+    box.innerHTML = '<div class="msg err">' + e.message + '</div>';
+  }
+  renderVerdict();
+}
+
+/* ---------------- Rendering: Verdikt ---------------- */
+function renderVerdict(){
+  const box = $("verdictBox");
+  const r = state.refData, t = state.tgtClim ? state.tgtClim[state.tgtMonth] : null;
+  if(!r || !t){ box.innerHTML = ""; return; }
+
+  const dFeels = t.feels - r.feels;
+  const dRh = t.rh - r.rh;
+  const dWind = t.wind - r.wind;
+
+  const warmer = dFeels >= 1 ? "wärmer" : dFeels <= -1 ? "kühler" : "gleich warm";
+  const humid = dRh >= 6 ? "schwüler" : dRh <= -6 ? "trockener" : "ähnlich feucht";
+  const windy = dWind >= 4 ? "deutlich windiger" : dWind <= -4 ? "windstiller" : "ähnlich windig";
+
+  let sentence;
+  if(Math.abs(dFeels) < 1){
+    sentence = "Gefühlt <b>gleich heiss</b> wie " + (state.refMode === "now" ? "jetzt bei dir" : "in " + placeLabel(state.ref)) +
+               ", aber " + humid + " und " + windy + ".";
+  } else {
+    sentence = "Gefühlt <b>" + Math.abs(round(dFeels, 0)) + " Grad " + warmer + "</b>, dazu " + humid + " und " + windy + ".";
+  }
+
+  const caveat = state.refMode === "now"
+    ? '<div style="font-size:11.5px;color:#8FA5A1;margin-top:9px;line-height:1.4">Verglichen wird dein Momentanwert mit dem typischen Tageshoch am Ziel. Am späten Abend fällt der Vergleich deshalb zu günstig aus.</div>'
+    : "";
+
+  box.innerHTML =
+    '<div class="verdict"><div class="head">' + placeLabel(state.target) + " im " + MONTHS_LONG[state.tgtMonth] + '</div>' +
+    sentence + caveat + '</div>' +
+    '<div class="card">' +
+      deltaRow("Gefühlt", dFeels, "°C", 14) +
+      deltaRow("Tagesmax", (t.tmax - (r.tmax != null ? r.tmax : r.temp)), "°C", 14) +
+      deltaRow("Feuchte", dRh, " %", 40) +
+      deltaRow("Wind", dWind, " km/h", 25) +
+    '</div>';
+}
+
+function deltaRow(k, v, unit, span){
+  if(v == null || !isFinite(v)) return "";
+  const clamped = Math.max(-span, Math.min(span, v));
+  const halfPct = Math.abs(clamped) / span * 50;
+  const style = v >= 0
+    ? "left:50%;width:" + halfPct + "%"
+    : "right:50%;width:" + halfPct + "%";
+  const sign = v > 0 ? "+" : "";
+  return '<div class="delta"><div class="dk">' + k + '</div>' +
+    '<div class="db"><i style="' + style + '"></i><u></u></div>' +
+    '<div class="dv mono">' + sign + round(v, Math.abs(v) < 10 ? 1 : 0) + unit + '</div></div>';
+}
+
+/* ---------------- Rendering: Jahresprofil ---------------- */
+function score(m, prio){
+  const ideal = 29;
+  const heat = Math.abs((m.feels != null ? m.feels : 0) - ideal);
+  const rain = m.rainDays != null ? m.rainDays : 0;
+  const wind = m.wind != null ? m.wind : 0;
+  if(prio === "dry") return -(rain * 2.2 + heat * 0.6);
+  if(prio === "wind") return wind * 1.6 - rain * 0.9 - heat * 0.4;
+  return -(heat * 1.3 + rain * 0.9);
+}
+
+async function renderYear(){
+  const box = $("yrBody");
+  if(!state.yearPlace){ box.innerHTML = '<div class="msg">Wähle einen Ort, um alle zwölf Monate zu sehen.</div>'; return; }
+  box.innerHTML = '<div class="skel" style="height:230px"></div>';
+  try{
+    const c = await fetchClimate(state.yearPlace);
+    state.yearClim = c;
+    const feels = c.map(m => m.feels).filter(v => v != null);
+    const lo = Math.min.apply(null, feels), hi = Math.max.apply(null, feels);
+    const range = Math.max(hi - lo, 4);
+    const scores = c.map(m => score(m, state.prio));
+    const best = Math.max.apply(null, scores);
+    const worst = Math.min.apply(null, scores);
+
+    let html = '<div class="yearlist">';
+    c.forEach((m, i) => {
+      const rel = (scores[i] - worst) / Math.max(best - worst, 0.001);
+      const isBest = rel > 0.82;
+      const w = 18 + ((m.feels - lo) / range) * 82;
+      html += '<div class="yrow' + (isBest ? " best" : "") + '">' +
+        '<div class="ym">' + MONTHS[i] + '</div>' +
+        '<div class="ybars">' +
+          '<div class="tempbar"><i style="left:0;width:' + w.toFixed(1) + '%;background:' + tempColor(m.feels) + '"></i>' +
+          '<span class="mono">' + fmt(m.feels, "°", 0) + ' gefühlt</span></div>' +
+          '<div class="ymeta"><span>Max <b class="mono">' + fmt(m.tmax, "°", 0) + '</b></span>' +
+          '<span>Feuchte <b class="mono">' + fmt(m.rh, "%", 0) + '</b></span>' +
+          '<span>Wind <b class="mono">' + fmt(m.wind, "", 0) + '</b></span>' +
+          '<span>Regen <b class="mono">' + fmt(m.rainDays, "d", 0) + '</b></span></div>' +
+        '</div></div>';
+    });
+    html += '</div><div class="scale"><span>kühl</span><span>Balken = gefühlte Tageshöchsttemperatur</span><span>heiss</span></div>';
+
+    const bestMonths = c.map((m, i) => i).filter(i => (scores[i] - worst) / Math.max(best - worst, 0.001) > 0.82);
+    const label = state.prio === "dry" ? "trockensten" : state.prio === "wind" ? "windigsten" : "angenehmsten";
+    html += '<div class="verdict" style="margin-top:12px"><div class="head">Beste Reisezeit</div>' +
+      'Am ' + label + ' ist es in <b>' + placeLabel(state.yearPlace) + '</b> im ' +
+      bestMonths.map(i => MONTHS_LONG[i]).join(" und ") + '.</div>';
+
+    box.innerHTML = html;
+  }catch(e){
+    box.innerHTML = '<div class="msg err">' + e.message + '</div>';
+  }
+}
+
+/* ---------------- Monatsleisten ---------------- */
+function buildMonths(el, getSel, onPick){
+  el.innerHTML = "";
+  MONTHS.forEach((m, i) => {
+    const b = document.createElement("button");
+    b.textContent = m;
+    b.setAttribute("aria-pressed", getSel() === i ? "true" : "false");
+    b.addEventListener("click", () => {
+      onPick(i);
+      Array.from(el.children).forEach((c, k) => c.setAttribute("aria-pressed", k === i ? "true" : "false"));
+    });
+    el.appendChild(b);
+  });
+}
+
+/* ---------------- Suchdialog ---------------- */
+const dlg = $("searchDlg");
+let searchTimer = null;
+
+function openSearch(forWhat){
+  state.pickFor = forWhat;
+  $("searchInput").value = "";
+  renderSearchBody([]);
+  dlg.showModal();
+  setTimeout(() => $("searchInput").focus(), 60);
+}
+
+function renderSearchBody(results){
+  const b = $("searchBody");
+  const f = favs();
+  let html = "";
+  if(results.length){
+    html += results.map((r, i) =>
+      '<div class="res" data-i="' + i + '"><div><div class="rn">' + r.name + '</div>' +
+      '<div class="rs">' + [r.admin, r.country].filter(Boolean).join(" · ") + '</div></div></div>').join("");
+  } else if(f.length){
+    html += '<div class="sec-label">Favoriten</div>';
+    html += f.map((r, i) =>
+      '<div class="res" data-f="' + i + '"><div><div class="rn">' + r.name + '</div>' +
+      '<div class="rs">' + (r.country || "") + '</div></div></div>').join("");
+  } else {
+    html += '<div class="msg">Tippe einen Ortsnamen ein.</div>';
+  }
+  b.innerHTML = html;
+  b.querySelectorAll(".res").forEach(el => {
+    el.addEventListener("click", () => {
+      const idx = el.getAttribute("data-i");
+      const fidx = el.getAttribute("data-f");
+      choosePlace(idx != null ? results[+idx] : favs()[+fidx]);
+    });
+  });
+}
+
+function choosePlace(p){
+  if(!p) return;
+  dlg.close();
+  if(state.pickFor === "ref"){
+    state.ref = p; $("refName").textContent = placeLabel(p); renderRef();
+  } else if(state.pickFor === "target"){
+    state.target = p; $("tgtName").textContent = placeLabel(p);
+    $("tgtStar").classList.toggle("on", isFav(p));
+    $("tgtStar").textContent = isFav(p) ? "★" : "☆";
+    renderTarget();
+  } else {
+    state.yearPlace = p; $("yrName").textContent = placeLabel(p);
+    $("yrStar").classList.toggle("on", isFav(p));
+    $("yrStar").textContent = isFav(p) ? "★" : "☆";
+    renderYear();
+  }
+  store(LAST_KEY, { ref: state.ref, target: state.target, year: state.yearPlace });
+}
+
+$("searchInput").addEventListener("input", e => {
+  clearTimeout(searchTimer);
+  const q = e.target.value.trim();
+  if(q.length < 2){ renderSearchBody([]); return; }
+  searchTimer = setTimeout(async () => {
+    $("searchBody").innerHTML = '<div class="msg">Suche…</div>';
+    try { renderSearchBody(await geocode(q)); }
+    catch(err){ $("searchBody").innerHTML = '<div class="msg err">Suche fehlgeschlagen.</div>'; }
+  }, 300);
+});
+$("closeDlg").addEventListener("click", () => dlg.close());
+$("useGeo").addEventListener("click", () => locate(true));
+
+/* ---------------- Standort ---------------- */
+function locate(fromDialog){
+  if(!navigator.geolocation){
+    if(fromDialog) $("searchBody").innerHTML = '<div class="msg err">Standort wird nicht unterstützt.</div>';
+    else $("refName").textContent = "Ort wählen";
+    return;
+  }
+  navigator.geolocation.getCurrentPosition(async pos => {
+    const p = await reverse(pos.coords.latitude, pos.coords.longitude);
+    if(fromDialog) choosePlace(p);
+    else { state.ref = p; $("refName").textContent = placeLabel(p); renderRef(); }
+  }, err => {
+    const m = "Standort nicht verfügbar – Ort bitte suchen.";
+    if(fromDialog) $("searchBody").innerHTML = '<div class="msg err">' + m + '</div>';
+    else { $("refName").textContent = "Ort wählen"; $("refBody").innerHTML = '<div class="msg">' + m + '</div>'; }
+  }, { enableHighAccuracy:false, timeout:9000, maximumAge:600000 });
+}
+
+/* ---------------- Ereignisse ---------------- */
+$("tabCompare").addEventListener("click", () => switchMode("compare"));
+$("tabYear").addEventListener("click", () => switchMode("year"));
+function switchMode(m){
+  state.mode = m;
+  $("tabCompare").setAttribute("aria-selected", m === "compare");
+  $("tabYear").setAttribute("aria-selected", m === "year");
+  $("viewCompare").classList.toggle("hidden", m !== "compare");
+  $("viewYear").classList.toggle("hidden", m !== "year");
+  if(m === "year" && !state.yearClim && state.yearPlace) renderYear();
+}
+
+$("refPick").addEventListener("click", () => openSearch("ref"));
+$("tgtPick").addEventListener("click", () => openSearch("target"));
+$("yrPick").addEventListener("click", () => openSearch("year"));
+
+$("tgtStar").addEventListener("click", () => {
+  toggleFav(state.target);
+  const on = isFav(state.target);
+  $("tgtStar").classList.toggle("on", on);
+  $("tgtStar").textContent = on ? "★" : "☆";
+});
+$("yrStar").addEventListener("click", () => {
+  toggleFav(state.yearPlace);
+  const on = isFav(state.yearPlace);
+  $("yrStar").classList.toggle("on", on);
+  $("yrStar").textContent = on ? "★" : "☆";
+});
+
+$("refModeSeg").addEventListener("click", e => {
+  const b = e.target.closest("button"); if(!b) return;
+  state.refMode = b.dataset.m;
+  Array.from($("refModeSeg").children).forEach(c => c.setAttribute("aria-pressed", c === b ? "true" : "false"));
+  renderRef();
+});
+
+$("prioSeg").addEventListener("click", e => {
+  const b = e.target.closest("button"); if(!b) return;
+  state.prio = b.dataset.p;
+  Array.from($("prioSeg").children).forEach(c => c.setAttribute("aria-pressed", c === b ? "true" : "false"));
+  renderYear();
+});
+
+/* ---------------- Start ---------------- */
+buildMonths($("refMonths"), () => state.refMonth, i => { state.refMonth = i; renderRef(); });
+buildMonths($("tgtMonths"), () => state.tgtMonth, i => { state.tgtMonth = i; renderTarget(); renderVerdict(); });
+
+(function init(){
+  const last = load(LAST_KEY, null);
+  if(last && last.target){
+    state.target = last.target;
+    $("tgtName").textContent = placeLabel(last.target);
+    $("tgtStar").textContent = isFav(last.target) ? "★" : "☆";
+    $("tgtStar").classList.toggle("on", isFav(last.target));
+    renderTarget();
+  }
+  if(last && last.year){
+    state.yearPlace = last.year;
+    $("yrName").textContent = placeLabel(last.year);
+    $("yrStar").textContent = isFav(last.year) ? "★" : "☆";
+    $("yrStar").classList.toggle("on", isFav(last.year));
+  }
+  if(last && last.ref){
+    state.ref = last.ref;
+    $("refName").textContent = placeLabel(last.ref);
+    renderRef();
+  } else {
+    locate(false);
+  }
+})();
+
+if("serviceWorker" in navigator){
+  navigator.serviceWorker.register("sw.js").catch(() => {});
+}
+</script>
+</body>
+</html>
