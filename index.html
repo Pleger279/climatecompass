@@ -735,14 +735,33 @@ async function renderTarget(){
     box.innerHTML =
       '<div class="place-sub" style="margin-bottom:8px">' + MONTHS_LONG[state.tgtMonth] + ' · Mittel 5 Jahre</div>' +
       metricsHTML(o) +
-      '<button class="ghost" id="tgtDetail" style="width:100%;margin-top:10px">Tagesgang im ' +
-      MONTHS_LONG[state.tgtMonth] + ' ansehen</button>';
+      '<div style="display:flex;gap:8px;margin-top:12px">' +
+        '<button class="ghost" id="tgtDetail" style="flex:1">Tagesgang</button>' +
+        '<button class="ghost" id="tgtYear" style="flex:1">Ganzes Jahr</button>' +
+      '</div>';
     $("tgtDetail").addEventListener("click", () => openDetail(state.target, state.tgtMonth));
+    $("tgtYear").addEventListener("click", () => showYearFor(state.target));
   }catch(e){
     state.tgtClim = null;
     box.innerHTML = '<div class="msg err">' + friendlyError(e) + '</div>';
   }
   renderVerdict();
+}
+
+/* Übernimmt einen Ort ins Jahresprofil und wechselt dorthin.
+   Die Klimadaten liegen bereits im Zwischenspeicher, es entsteht also kein neuer Abruf. */
+function showYearFor(p){
+  if(!p) return;
+  const changed = !state.yearPlace || state.yearPlace.lat !== p.lat || state.yearPlace.lon !== p.lon;
+  state.yearPlace = p;
+  $("yrName").textContent = placeLabel(p);
+  $("yrStar").textContent = isFav(p) ? "★" : "☆";
+  $("yrStar").classList.toggle("on", isFav(p));
+  if(changed) state.yearClim = null;
+  store(LAST_KEY, { ref: state.ref, target: state.target, year: p });
+  switchMode("year");
+  if(!state.yearClim) renderYear(); else paintYear();
+  window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
 /* ---------------- Rendering: Verdikt ---------------- */
