@@ -169,14 +169,18 @@
   .pin.ref i{background:var(--ref);}
   .pin.tgt i{background:var(--ink);}
   .pin b{
-    position:absolute;transform:translateX(-50%);white-space:nowrap;
-    font-size:12.5px;font-weight:600;font-variant-numeric:tabular-nums;
+    position:absolute;transform:translateX(-50%);white-space:nowrap;text-align:center;
+    font-size:12.5px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1.25;
   }
+  .pin b em{display:block;font-style:normal;font-weight:400;font-size:10.5px;opacity:.7;}
   .pin.ref b{top:12px;color:var(--ref);}
   .pin.tgt b{bottom:12px;color:var(--ink);}
-  .axis-foot{display:flex;justify-content:space-between;gap:10px;margin-top:26px;font-size:11.5px;}
+  .axis.two-line .axis-head{margin-bottom:30px;}
+  .axis.two-line .axis-foot{margin-top:40px;}
+  .axis-foot{display:flex;justify-content:space-between;gap:12px;margin-top:26px;font-size:11.5px;}
+  .axis-foot span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .axis-foot .zref{color:var(--muted);}
-  .axis-foot .ztgt{color:var(--ink);font-weight:500;}
+  .axis-foot .ztgt{color:var(--ink);font-weight:500;text-align:right;}
   .axis-legend{display:flex;gap:16px;font-size:11.5px;color:var(--muted);margin:2px 0 16px;}
   .axis-legend i{display:inline-block;width:10px;height:10px;border-radius:50%;vertical-align:-1px;margin-right:6px;}
 
@@ -402,12 +406,14 @@ const state = {
   ref: null,        // {name, country, lat, lon}
   refMonth: new Date().getMonth(),
   refData: null,    // {tmax, tmin, feelsMax, feelsMin, rh, wind}
+  refClim: null,    // Zehnjahresmittel des Referenzorts, für Klimagrössen wie Regentage
   target: null,
   tgtMonth: (new Date().getMonth() + 2) % 12,
   tgtClim: null,    // 12 Monatsaggregate
   yearPlace: null,
   yearClim: null,
   crit: "rain",
+  tempMode: "feels",   // Balken im Jahresprofil: gefühlte oder effektive Temperatur
   pickFor: "target",
   mapPick: null
 };
@@ -433,6 +439,7 @@ function toggleFav(p){
   store(FAV_KEY, f.slice(0, 40));
 }
 function placeLabel(p){ return p ? p.name + (p.country ? ", " + p.country : "") : "–"; }
+function shortName(p){ return p ? p.name : "–"; }
 
 /* ---------------- API ---------------- */
 async function getJSON(url){
@@ -595,7 +602,7 @@ const rgba = (c, a) => "rgba(" + c.join(",") + "," + a + ")";
 
 const SPECTRA = {
   temp: [[-5,[74,110,180]],[8,[80,160,190]],[17,[95,175,140]],[24,[214,175,60]],[31,[221,120,50]],[40,[186,52,44]]],
-  dew:  [[2,[196,166,74]],[13,[110,180,160]],[18,[70,140,180]],[22,[74,90,170]],[26,[86,58,140]]],
+  humid:[[30,[198,168,76]],[50,[152,180,138]],[70,[88,168,172]],[85,[68,118,180]],[100,[76,80,166]]],
   wind: [[0,[150,170,178]],[12,[110,160,180]],[24,[60,130,170]],[38,[38,92,146]],[55,[26,58,110]]],
   rain: [[0,[206,178,88]],[6,[150,180,150]],[13,[92,158,180]],[21,[54,110,168]],[30,[36,70,132]]]
 };
@@ -604,8 +611,8 @@ function zone(kind, v){
   if(v == null) return "";
   if(kind === "temp") return v < 5 ? "kalt" : v < 14 ? "kühl" : v < 21 ? "mild" :
     v < 27 ? "warm" : v < 33 ? "heiss" : "sehr heiss";
-  if(kind === "dew") return v < 13 ? "trocken" : v < 16 ? "angenehm" : v < 18 ? "spürbar schwül" :
-    v < 21 ? "schwül" : "drückend";
+  if(kind === "humid") return v < 40 ? "trocken" : v < 60 ? "angenehm" : v < 75 ? "spürbar feucht" :
+    v < 85 ? "schwül" : "sehr schwül";
   if(kind === "wind") return v < 6 ? "flau" : v < 20 ? "leicht" : v < 29 ? "mässig" :
     v < 39 ? "frisch" : "stark";
   if(kind === "rain") return v < 4 ? "sehr trocken" : v < 9 ? "trocken" : v < 15 ? "wechselhaft" :
@@ -618,7 +625,7 @@ function tempColor(t){ return rgb(spectrum(SPECTRA.temp, t)); }
 /* Färbt den Seitenhintergrund nach den Zielbedingungen ein. */
 function setAtmos(feelsVal, humidVal){
   const a = spectrum(SPECTRA.temp, feelsVal);
-  const b = spectrum(SPECTRA.dew, humidVal != null ? humidVal : 12);
+  const b = spectrum(SPECTRA.humid, humidVal != null ? humidVal : 55);
   const dark = matchMedia("(prefers-color-scheme: dark)").matches;
   const root = document.documentElement;
   root.style.setProperty("--tintA", rgba(a, dark ? 0.30 : 0.34));
@@ -656,6 +663,14 @@ async function renderRef(){
       box.innerHTML =
         '<div class="place-sub" style="margin-bottom:8px">Heute' + (o.sky ? " · " + o.sky : "") + '</div>' +
         metricsHTML(o);
+      renderVerdict();
+      // Regentage sind eine Klimagrösse, kein Tageswert – dafür holen wir zusätzlich
+      // das Zehnjahresmittel des Referenzorts. Läuft nach dem Zeichnen, blockiert also nichts.
+      try{
+        state.refClim = await fetchClimate(state.ref);
+        renderVerdict();
+      }catch(e){ state.refClim = null; }
+      return;
     } else {
       const c = await fetchClimate(state.ref);
       const o = c[state.refMonth];
@@ -718,23 +733,31 @@ function renderVerdict(){
       (dNight > 0 ? "wärmer" : "kühler") + "</b> als hier.";
   }
 
-  setAtmos(t.feels, t.dew);
+  // Regentage sind eine Klimagrösse: im Heute-Modus nehmen wir dafür das
+  // Zehnjahresmittel des Referenzorts für den laufenden Monat.
+  const refRain = state.refMode === "now"
+    ? (state.refClim ? state.refClim[new Date().getMonth()].rainDays : null)
+    : r.rainDays;
+  const rainLabel = state.refMode === "now"
+    ? "Regentage im " + MONTHS_LONG[new Date().getMonth()] + " gegen " + MONTHS_LONG[state.tgtMonth]
+    : "Regentage pro Monat";
+
+  setAtmos(t.feels, t.rh);
 
   box.innerHTML =
     '<div class="verdict"><div class="head">' + placeLabel(state.target) + " im " + MONTHS_LONG[state.tgtMonth] + '</div>' +
     sentence + '</div>' +
     '<div class="card"><div class="card-label">Auf einer Skala</div>' +
       '<div class="axis-legend">' +
-        '<span><i style="background:var(--ref)"></i>' +
-          (state.refMode === "now" ? "hier heute" : placeLabel(state.ref)) + '</span>' +
-        '<span><i style="background:var(--ink)"></i>' + placeLabel(state.target) + '</span>' +
+        '<span><i style="background:var(--ref)"></i>' + shortName(state.ref) + '</span>' +
+        '<span><i style="background:var(--ink)"></i>' + shortName(state.target) + '</span>' +
       '</div>' +
       '<div class="axes">' +
         axis("Gefühlt am Tag", "temp", 0, 45, rFeelsDay, t.feels, "°") +
         axis("Gefühlt in der Nacht", "temp", 0, 45, r.feelsMin, t.feelsMin, "°") +
-        axis("Schwüle", "dew", 0, 26, r.dew, t.dew, "°", "Taupunkt") +
+        axis("Luftfeuchtigkeit", "humid", 30, 100, r.rh, t.rh, " %") +
         axis("Wind", "wind", 0, 55, r.wind, t.wind, " km/h") +
-        axis("Regentage pro Monat", "rain", 0, 30, r.rainDays, t.rainDays, "") +
+        axis(rainLabel, "rain", 0, 30, refRain, t.rainDays, "") +
       '</div>' +
       '<p class="tapnote">Zielwerte: Mittel der letzten 10 Jahre für ' + MONTHS_LONG[state.tgtMonth] + '.</p>' +
     '</div>';
@@ -742,10 +765,11 @@ function renderVerdict(){
 
 /* Eine gemeinsame Skala mit zwei Punkten: grau für hier, dunkel für das Ziel.
    Der Abstand zwischen den Punkten ist die Antwort, die Zahlen sind der Beleg. */
-function axis(label, kind, min, max, refVal, tgtVal, unit, altName){
+function axis(label, kind, min, max, refVal, tgtVal, unit, altName, subs){
   if(tgtVal == null || !isFinite(tgtVal)) return "";
   const stops = SPECTRA[kind];
   const pos = v => Math.max(2, Math.min(98, ((v - min) / (max - min)) * 100));
+  const sub = s => s ? '<em>' + s + '</em>' : '';
 
   const grad = stops.map(s => rgb(s[1]) + " " + pos(s[0]).toFixed(1) + "%").join(", ");
   const pT = pos(tgtVal);
@@ -762,19 +786,20 @@ function axis(label, kind, min, max, refVal, tgtVal, unit, altName){
   const gapTxt = gap == null ? "" :
     (gap > 0 ? "+" : "") + round(gap, Math.abs(gap) < 10 ? 1 : 0) + unit;
 
-  return '<div class="axis">' +
+  const twoLine = subs && (subs.ref || subs.tgt);
+  return '<div class="axis' + (twoLine ? " two-line" : "") + '">' +
     '<div class="axis-head"><span class="ax-label">' + label + (altName ? " · " + altName : "") + '</span>' +
       (gapTxt ? '<span class="ax-gap">' + gapTxt + '</span>' : '') + '</div>' +
     '<div class="axis-track" style="background:linear-gradient(90deg,' + grad + ')">' +
       conn +
       (hasRef ? '<div class="pin ref" style="left:' + pR.toFixed(1) + '%"><i></i><b>' +
-        fmt(refVal, unit, 0) + '</b></div>' : '') +
+        fmt(refVal, unit, 0) + sub(subs && subs.ref) + '</b></div>' : '') +
       '<div class="pin tgt" style="left:' + pT.toFixed(1) + '%"><i></i><b>' +
-        fmt(tgtVal, unit, 0) + '</b></div>' +
+        fmt(tgtVal, unit, 0) + sub(subs && subs.tgt) + '</b></div>' +
     '</div>' +
     '<div class="axis-foot">' +
-      '<span class="zref">' + (hasRef ? "hier " + zone(kind, refVal) : "") + '</span>' +
-      '<span class="ztgt">dort ' + zone(kind, tgtVal) + '</span>' +
+      '<span class="zref">' + (hasRef ? shortName(state.ref) + " " + zone(kind, refVal) : "") + '</span>' +
+      '<span class="ztgt">' + shortName(state.target) + " " + zone(kind, tgtVal) + '</span>' +
     '</div>' +
   '</div>';
 }
@@ -788,9 +813,10 @@ function axis(label, kind, min, max, refVal, tgtVal, unit, altName){
    das wichtigste Einzelkriterium, wichtiger als eine angenehme Temperatur. Gezählt
    wird der Anteil Tage unter 1 mm.
 
-   Luftfeuchtigkeit – Bewertet über den Taupunkt statt die relative Feuchte, weil
-   der Taupunkt das Schwüleempfinden direkt abbildet: bis 13 °C trocken,
-   ab 16 °C spürbar schwül, ab 21 °C drückend.
+   Luftfeuchtigkeit – Relative Feuchte im Monatsmittel: bis 40 % trocken, ab 60 %
+   spürbar feucht, ab 85 % sehr schwül. Sauberer wäre der Taupunkt, weil er die
+   Schwüle temperaturunabhängig abbildet – die relative Feuchte ist dafür im Alltag
+   die Grösse, die man einordnen kann.
 
    Gefühlte Temperatur – Der Holiday Climate Index für Strandziele wertet den
    Bereich um 28–31 als höchste Stufe und alles ab 39 als zu heiss. Befragungen
@@ -813,9 +839,9 @@ const CRITERIA = {
   },
   humid: {
     label: "Luftfeuchtigkeit",
-    score: m => m.dew == null ? null : (1 - ramp(m.dew, 13, 24)) * 100,
-    detail: m => m.dew == null ? "" : "Taupunkt " + fmt(m.dew, " °C", 0) + " – " + dewWord(m.dew),
-    note: "Bewertet über den Taupunkt: bis 13 °C trocken, ab 16 °C spürbar schwül, ab 21 °C drückend."
+    score: m => m.rh == null ? null : (1 - ramp(m.rh, 45, 90)) * 100,
+    detail: m => m.rh == null ? "" : fmt(m.rh, " %", 0) + " relative Feuchte – " + zone("humid", m.rh),
+    note: "Relative Feuchte im Monatsmittel: bis 40 % trocken, ab 60 % spürbar feucht, ab 85 % sehr schwül. Der Wert hängt an der Temperatur – dieselben 80 % fühlen sich bei 30 °C deutlich schwerer an als bei 15 °C."
   },
   feels: {
     label: "Gefühlte Temperatur",
@@ -837,59 +863,78 @@ const CRITERIA = {
   }
 };
 
-function dewWord(d){
-  if(d < 13) return "trocken";
-  if(d < 16) return "angenehm";
-  if(d < 18) return "spürbar schwül";
-  if(d < 21) return "unangenehm schwül";
-  return "drückend";
-}
 
 async function renderYear(){
   const box = $("yrBody");
   if(!state.yearPlace){ box.innerHTML = '<div class="msg">Wähle einen Ort, um alle zwölf Monate zu sehen.</div>'; return; }
   box.innerHTML = '<div class="skel" style="height:260px"></div>';
   try{
-    const c = await fetchClimate(state.yearPlace);
-    state.yearClim = c;
-    const feels = c.map(m => m.feels).filter(v => v != null);
-    const lo = Math.min.apply(null, feels), hi = Math.max.apply(null, feels);
-    const range = Math.max(hi - lo, 4);
-
-    let html = '<div class="yearlist">';
-    c.forEach((m, i) => {
-      const w = 18 + ((m.feels - lo) / range) * 82;
-      html += '<div class="yrow" data-m="' + i + '" role="button" tabindex="0">' +
-        '<div class="ym">' + MONTHS[i] + '</div>' +
-        '<div class="ybars">' +
-          '<div class="tempbar"><i style="left:0;width:' + w.toFixed(1) + '%;background:' + tempColor(m.feels) + '"></i>' +
-          '<span class="mono">' + fmt(m.feels, "°", 0) + ' gefühlt</span></div>' +
-          '<div class="ymeta"><span>Max <b class="mono">' + fmt(m.tmax, "°", 0) + '</b></span>' +
-          '<span>Feuchte <b class="mono">' + fmt(m.rh, "%", 0) + '</b></span>' +
-          '<span>Wind <b class="mono">' + fmt(m.wind, "", 0) + '</b></span>' +
-          '<span>Regen <b class="mono">' + fmt(m.rainDays, "d", 0) + '</b></span></div>' +
-        '</div></div>';
-    });
-    html += '</div><p class="tapnote">Auf einen Monat tippen für den Tagesgang.</p>';
-    html += '<div id="recoBox"></div>';
-
-    box.innerHTML = html;
-
-    box.querySelectorAll(".yrow").forEach(row => {
-      const m = +row.dataset.m;
-      row.addEventListener("click", () => openDetail(state.yearPlace, m));
-      row.addEventListener("keydown", e => {
-        if(e.key === "Enter" || e.key === " "){ e.preventDefault(); openDetail(state.yearPlace, m); }
-      });
-    });
-
-    const warm = c.reduce((a, m) => (m.feels != null && (a == null || m.feels > a) ? m.feels : a), null);
-    const dewMean = c.map(m => m.dew).filter(v => v != null);
-    setAtmos(warm, dewMean.length ? dewMean.reduce((s, v) => s + v, 0) / dewMean.length : null);
-    renderReco();
+    state.yearClim = await fetchClimate(state.yearPlace);
+    paintYear();
   }catch(e){
     box.innerHTML = '<div class="msg err">' + e.message + '</div>';
   }
+}
+
+/* Zeichnet aus den bereits geladenen Daten – das Umschalten löst keinen Abruf aus. */
+function paintYear(){
+  const box = $("yrBody");
+  const c = state.yearClim;
+  if(!c) return;
+
+  const useFeels = state.tempMode === "feels";
+  const val = m => useFeels ? m.feels : m.tmax;
+  const alt = m => useFeels ? m.tmax : m.feels;
+  const altLabel = useFeels ? "Effektiv" : "Gefühlt";
+
+  const vals = c.map(val).filter(v => v != null);
+  const lo = Math.min.apply(null, vals), hi = Math.max.apply(null, vals);
+  const range = Math.max(hi - lo, 4);
+
+  let html =
+    '<div class="seg" id="tempSeg">' +
+      '<button data-t="feels" aria-pressed="' + useFeels + '">Gefühlte Temperatur</button>' +
+      '<button data-t="real" aria-pressed="' + !useFeels + '">Effektive Temperatur</button>' +
+    '</div><div class="yearlist">';
+
+  c.forEach((m, i) => {
+    const v = val(m);
+    const w = v == null ? 18 : 18 + ((v - lo) / range) * 82;
+    html += '<div class="yrow" data-m="' + i + '" role="button" tabindex="0">' +
+      '<div class="ym">' + MONTHS[i] + '</div>' +
+      '<div class="ybars">' +
+        '<div class="tempbar"><i style="left:0;width:' + w.toFixed(1) + '%;background:' + tempColor(v) + '"></i>' +
+        '<span class="mono">' + fmt(v, "°", 0) + '</span></div>' +
+        '<div class="ymeta"><span>' + altLabel + ' <b class="mono">' + fmt(alt(m), "°", 0) + '</b></span>' +
+        '<span>Nachts <b class="mono">' + fmt(m.tmin, "°", 0) + '</b></span>' +
+        '<span>Feuchte <b class="mono">' + fmt(m.rh, "%", 0) + '</b></span>' +
+        '<span>Wind <b class="mono">' + fmt(m.wind, "", 0) + '</b></span>' +
+        '<span>Regen <b class="mono">' + fmt(m.rainDays, "d", 0) + '</b></span></div>' +
+      '</div></div>';
+  });
+  html += '</div><p class="tapnote">Auf einen Monat tippen für den Tagesgang.</p>';
+  html += '<div id="recoBox"></div>';
+
+  box.innerHTML = html;
+
+  box.querySelectorAll(".yrow").forEach(row => {
+    const m = +row.dataset.m;
+    row.addEventListener("click", () => openDetail(state.yearPlace, m));
+    row.addEventListener("keydown", e => {
+      if(e.key === "Enter" || e.key === " "){ e.preventDefault(); openDetail(state.yearPlace, m); }
+    });
+  });
+
+  $("tempSeg").addEventListener("click", e => {
+    const b = e.target.closest("button"); if(!b) return;
+    state.tempMode = b.dataset.t;
+    paintYear();
+  });
+
+  const warm = c.reduce((a, m) => (m.feels != null && (a == null || m.feels > a) ? m.feels : a), null);
+  const rhAll = c.map(m => m.rh).filter(v => v != null);
+  setAtmos(warm, rhAll.length ? rhAll.reduce((s, v) => s + v, 0) / rhAll.length : null);
+  renderReco();
 }
 
 function renderReco(){
@@ -1179,7 +1224,8 @@ function choosePlace(p){
   if(!p) return;
   dlg.close();
   if(state.pickFor === "ref"){
-    state.ref = p; $("refName").textContent = placeLabel(p); renderRef();
+    state.ref = p; state.refClim = null;
+    $("refName").textContent = placeLabel(p); renderRef();
   } else if(state.pickFor === "target"){
     state.target = p; $("tgtName").textContent = placeLabel(p);
     $("tgtStar").classList.toggle("on", isFav(p));
@@ -1337,7 +1383,7 @@ function locate(fromDialog){
   navigator.geolocation.getCurrentPosition(async pos => {
     const p = await reverse(pos.coords.latitude, pos.coords.longitude);
     if(fromDialog) choosePlace(p);
-    else { state.ref = p; $("refName").textContent = placeLabel(p); renderRef(); }
+    else { state.ref = p; state.refClim = null; $("refName").textContent = placeLabel(p); renderRef(); }
   }, err => {
     const m = "Standort nicht verfügbar – Ort bitte suchen.";
     if(fromDialog) $("searchBody").innerHTML = '<div class="msg err">' + m + '</div>';
@@ -1410,7 +1456,7 @@ buildMonths($("tgtMonths"), () => state.tgtMonth, i => { state.tgtMonth = i; ren
 })();
 
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
-  if(state.mode === "compare"){ renderVerdict(); } else if(state.yearClim){ renderYear(); }
+  if(state.mode === "compare"){ renderVerdict(); } else if(state.yearClim){ paintYear(); }
 });
 
 if("serviceWorker" in navigator){
